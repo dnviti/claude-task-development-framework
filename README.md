@@ -26,7 +26,7 @@ claude-task-development-framework gives your AI-assisted development workflow a 
 1. **Clone or copy claude-task-development-framework into your project root:**
 
    ```bash
-   git clone https://github.com/YOUR_USERNAME/claude-task-development-framework.git my-project
+   git clone https://github.com/dnviti/claude-task-development-framework.git my-project
    cd my-project
    ```
 
