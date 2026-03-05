@@ -14,14 +14,11 @@ Always respond and work in English. The task block content (field labels, descri
 
 ## Current Task State
 
-### Highest task IDs (last 20, sorted by number):
-!`grep -rohE '[A-Z][A-Z0-9]+-[0-9]{3}' to-do.txt progressing.txt done.txt 2>/dev/null | sort -t'-' -k2 -n | tail -20`
-
-### All prefixes currently in use:
-!`grep -rohE '[A-Z][A-Z0-9]+-[0-9]{3}' to-do.txt progressing.txt done.txt 2>/dev/null | sed 's/-[0-9]*//' | sort -u`
+### Next available task ID and existing prefixes:
+!`python3 scripts/task_manager.py next-id --type task`
 
 ### Section headers in to-do.txt:
-!`grep -n 'SECTION [A-Z]' to-do.txt | tr -d '\r'`
+!`python3 scripts/task_manager.py sections --file to-do.txt`
 
 ## Arguments
 
@@ -50,12 +47,7 @@ Analyze the task description and select an appropriate code prefix.
 
 ### Step 3: Compute the Next Task Number
 
-Task numbering is **globally sequential** across all prefixes and all three files.
-
-1. From the "Highest task IDs" data above, extract all numeric parts (e.g., `AUTH-003` -> 3).
-2. **Ignore false positives** like `AES-256` or `SHA-256` — these are not task codes but algorithm references. Only consider IDs where the prefix is a known task prefix or matches the pattern of a short alphabetical prefix.
-3. Find the maximum number.
-4. The new task number = `max + 1`, zero-padded to 3 digits.
+Use the `next_number` field from the "Next available task ID" JSON above. The `prefixes` array shows all existing domain prefixes. No manual computation needed — the script handles global sequencing and false-positive filtering.
 
 ### Step 4: Explore the Codebase
 
@@ -85,10 +77,7 @@ Generate the task block in the **exact format** used by existing tasks. All cont
 
   TECHNICAL DETAILS:
   Detailed technical implementation plan. Structure by layer/file:
-    - Database/schema changes (if needed)
-    - Backend services, controllers, routes
-    - Frontend components, stores, API calls
-    - Configuration changes
+[TECH_DETAIL_LAYERS]
   Use indented sub-sections with specific code snippets, type
   definitions, function signatures, and endpoint paths where appropriate.
 
@@ -124,12 +113,9 @@ Then use `AskUserQuestion` with these options:
 
 Before writing, perform a final duplicate check:
 
-1. Search all three task files for the key concepts in the task title and description:
-   ```
-   grep -i "keyword1" to-do.txt progressing.txt done.txt
-   grep -i "keyword2" to-do.txt progressing.txt done.txt
-   ```
-2. If a potentially similar task is found, warn the user and ask whether to proceed or abort.
+1. Run: `python3 scripts/task_manager.py duplicates --keywords "keyword1,keyword2,keyword3"`
+   Use 2-3 key terms from the task title and description as keywords.
+2. If the JSON output contains matches that look like a similar task, warn the user and ask whether to proceed or abort.
 3. If no duplicates found, continue to Step 8.
 
 ### Step 8: Insert the Task into to-do.txt
@@ -137,7 +123,7 @@ Before writing, perform a final duplicate check:
 Determine the correct insertion point based on the confirmed section.
 
 **Insertion rules:**
-1. Use `grep -n` to find the target section header line number and the NEXT section header line number.
+1. Use the section data from the "Section headers" JSON above to find the target section's line number.
 2. Read that range of lines to find the last task block in the section.
 3. Insert the new task block **after the last existing task** in the section (or after the section header + blank lines if the section is empty).
 4. Maintain whitespace conventions: two blank lines between tasks, two blank lines before the next section header.

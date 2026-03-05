@@ -14,8 +14,8 @@ This skill does NOT close or commit tasks — use `/task-pick` for that.
 
 ## Current Task State
 
-### In-progress tasks (from progressing.txt):
-!`grep '^\[~\]' progressing.txt 2>/dev/null | tr -d '\r'`
+### In-progress tasks:
+!`python3 scripts/task_manager.py list --status progressing --format summary`
 
 ## Instructions
 
@@ -37,22 +37,26 @@ Read `progressing.txt` and identify all tasks marked `[~]`.
 
 ### Step 2: Read the Full Task Block
 
-Read the complete task block from `progressing.txt` for the selected task — everything between its `------` separator lines.
+Get the full parsed task data and file existence report:
+```bash
+python3 scripts/task_manager.py parse TASK-CODE
+python3 scripts/task_manager.py verify-files TASK-CODE
+```
 
-Extract these key sections:
-- **DESCRIPTION** — what the task is about
-- **TECHNICAL DETAILS** — the technical implementation details
-- **Files involved** — files to CREATE and MODIFY
+The `parse` command returns all task fields as structured JSON: description, technical_details, files_create, files_modify, priority, dependencies.
+The `verify-files` command returns a JSON report showing which files exist (`"exists": true/false`) and an `all_exist` summary.
 
 ### Step 3: Assess Current Implementation State
 
-For each file in the Files involved section, check what has already been done:
+Use the `verify-files` report as a starting point. For each file:
 
-**For files marked CREATE:**
-1. Use `Glob` to check if the file exists at the specified path
-2. If not found at the exact path, search for the filename in nearby directories
-3. If found, read it and check for key exports, components, or functions described in TECHNICAL DETAILS
-4. Note whether the file is: **missing**, **stub/empty**, or **implemented** (with details)
+**For files marked CREATE that exist (`"exists": true`):**
+1. Read the file and check for key exports, components, or functions described in TECHNICAL DETAILS
+2. Note whether the file is: **stub/empty** or **implemented** (with details)
+
+**For files marked CREATE that are missing (`"exists": false`):**
+1. Search for the filename in nearby directories (implementations may use slightly different paths)
+2. If still not found, mark as **missing**
 
 **For files marked MODIFY:**
 1. Read the file to understand its current state

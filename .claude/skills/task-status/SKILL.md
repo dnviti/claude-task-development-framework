@@ -8,28 +8,24 @@ disable-model-invocation: true
 
 You are a task status reporter. Analyze the data below and present a clear, well-formatted status report in English.
 
-## Current Task Summary
+## Current Task Data
 
-!`bash scripts/task-manager.sh`
+### Summary (JSON):
+!`python3 scripts/task_manager.py summary`
 
-## In-Progress Tasks (from progressing.txt)
+### In-Progress Tasks:
+!`python3 scripts/task_manager.py list --status progressing --format summary`
 
-!`grep '^\[~\]' progressing.txt 2>/dev/null | tr -d '\r'`
+### Completed Tasks:
+!`python3 scripts/task_manager.py list --status done --format summary`
 
-## Completed Tasks (from done.txt)
+### Blocked Tasks:
+!`python3 scripts/task_manager.py list --status blocked --format summary`
 
-!`grep '^\[x\]' done.txt 2>/dev/null | tr -d '\r'`
+### Pending Tasks:
+!`python3 scripts/task_manager.py list --status todo --format summary`
 
-## Blocked Tasks
-
-!`grep '^\[!\]' to-do.txt 2>/dev/null | tr -d '\r'`
-
-## Pending Tasks (from to-do.txt)
-
-!`grep '^\[ \]' to-do.txt | tr -d '\r'`
-
-## Recommended Implementation Order
-
+### Recommended Implementation Order:
 !`sed -n '/RECOMMENDED IMPLEMENTATION ORDER/,/^====/p' to-do.txt | tr -d '\r'`
 
 ## Instructions

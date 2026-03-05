@@ -13,13 +13,13 @@ You are a project initialization assistant. Your job is to guide the user throug
 ## Current Directory State
 
 ### Existing files:
-!`ls -la 2>/dev/null || echo "(empty directory)"`
+!`python3 -c "from pathlib import Path; files=sorted(Path('.').iterdir()); [print(f.name) for f in files] if files else print('(empty directory)')"`
 
 ### Git status:
-!`git status --short 2>/dev/null || echo "(not a git repository)"`
+!`git status --short 2>&1 || echo "(not a git repository)"`
 
 ### CLAUDE.md status:
-!`test -f CLAUDE.md && echo "Exists ($(wc -l < CLAUDE.md) lines)" || echo "Not found"`
+!`python3 -c "from pathlib import Path; p=Path('CLAUDE.md'); print(f'Exists ({len(p.read_text().splitlines())} lines)') if p.exists() else print('Not found')"`
 
 ## Arguments
 
@@ -183,6 +183,62 @@ Edit the following skill files to configure them for this specific project:
 
 In each skill, replace the generic `[DEV_PORTS]`, `[START_COMMAND]`, and `[PREDEV_COMMAND]` placeholders in the bash code blocks with the actual project values, so the skills work without any manual configuration.
 
+#### 5d. Update Workflow Skills
+
+Based on the detected project configuration, update the following skill files by replacing their placeholders with project-specific values:
+
+**`.claude/skills/test-engineer/SKILL.md`:**
+- `[TEST_FRAMEWORK]` — The test framework for the stack (e.g., Vitest for Vite/React, pytest for Python, `go test` for Go). If the scaffold did not include a test framework, choose the most popular one for the stack and note it in the orientation report.
+- `[TEST_COMMAND]` — The command to run tests (e.g., `npx vitest run`, `pytest`, `cargo test`).
+- `[TEST_FILE_PATTERN]` — The naming convention for test files (e.g., `*.test.ts`, `test_*.py`).
+- `[CI_RUNTIME_SETUP]` — The GitHub Actions setup step for the project's runtime. Replace with the actual YAML steps block (e.g., `- uses: actions/setup-node@v4` with the detected Node version, or `- uses: actions/setup-python@v5` with detected Python version).
+
+**`.claude/skills/task-create/SKILL.md` and `.claude/skills/idea-approve/SKILL.md`:**
+- `[TECH_DETAIL_LAYERS]` — Replace with an indented list of the project's architectural layers, derived from the scaffolded directory structure and framework conventions. Each line should name the layer and its directory. Example for Next.js:
+  ```
+      - App Router pages and layouts (app/)
+      - API routes (app/api/)
+      - React components (components/)
+      - Database schema and queries (prisma/)
+      - Shared utilities and types (lib/)
+      - Configuration and environment
+  ```
+
+**`.claude/skills/idea-create/SKILL.md`:**
+- `[IDEA_CATEGORIES]` — Replace with a markdown table combining 3-4 universal categories (Core Features, Security, Performance, Infrastructure) with 2-3 project-domain categories derived from the project purpose. Example for an e-commerce app:
+  ```
+  | Category | Domain |
+  |----------|--------|
+  | `Product Catalog` | Product listings, search, filtering |
+  | `Checkout` | Cart, payment, order processing |
+  | `User Accounts` | Registration, profiles, preferences |
+  | `Core Features` | Primary functionality, core workflows |
+  | `Security` | Authentication, authorization, encryption |
+  | `Performance` | Optimization, caching, scaling |
+  | `Infrastructure` | DevOps, CI/CD, deployment, Docker |
+  ```
+
+**`.claude/skills/docs/SKILL.md`:**
+- `[DOC_CATEGORIES]` — Replace with a list of documentation categories derived from the project's architecture layers. Example: `api`, `database`, `components`, `architecture`, `deployment`.
+
+**`.claude/skills/task-scout/SKILL.md`:**
+- `[PROJECT_CONTEXT]` — Replace with a 3-line summary block describing the project's domain, tech stack, and target audience (gathered in Steps 1-2). Example:
+  ```
+  > - **Domain**: E-commerce platform for artisan goods
+  > - **Tech Stack**: Next.js 15, PostgreSQL, Prisma, Tailwind CSS
+  > - **Target Audience**: Small business owners selling handmade products
+  ```
+- `[SCOUT_CATEGORIES]` — Replace with a category list that combines universal categories with 2-3 project-domain-specific categories (use the same domain categories as idea-create). Example:
+  ```
+  - **Product Catalog**: Product discovery, search, filtering, recommendations
+  - **Checkout & Payments**: Cart, payment methods, order management
+  - **Core Features**: Primary functionality improvements and extensions
+  - **Security**: Authentication, authorization, encryption, audit logging
+  - **UX/Productivity**: Keyboard shortcuts, search, themes, accessibility
+  - **Performance**: Caching, optimization, lazy loading, compression
+  - **Developer Experience**: Testing, documentation, CI/CD, debugging tools
+  ```
+
 ### Step 7: Orientation Report
 
 Present a comprehensive report to the user:
@@ -223,7 +279,11 @@ The following skills are now configured for your project:
 - `/app-start` — starts your dev server on port [port]
 - `/app-stop` — stops your dev server
 - `/app-restart` — restarts your dev server
-- `/task-create`, `/task-pick` — manage your development tasks
+- `/test-engineer` — configured for [test framework] with CI pipeline template
+- `/task-create`, `/task-pick` — architecture-aware task templates
+- `/idea-create` — project-relevant idea categories
+- `/docs` — documentation with project-specific categories
+- `/task-scout` — feature scouting tuned to your project domain
 ```
 
 ## Important Rules
@@ -231,7 +291,7 @@ The following skills are now configured for your project:
 1. **NEVER scaffold without explicit user confirmation** of both the stack and the scaffolding tool.
 2. **NEVER overwrite existing project files** — if the directory is not empty, warn the user and ask how to proceed.
 3. **ALWAYS update CLAUDE.md** with DEV_PORTS, START_COMMAND, PREDEV_COMMAND, and VERIFY_COMMAND after scaffolding.
-4. **ALWAYS update the app lifecycle skills** (app-start, app-stop, app-restart) with project-specific values.
+4. **ALWAYS update the app lifecycle skills** (app-start, app-stop, app-restart) **AND workflow skills** (test-engineer, task-create, idea-approve, idea-create, docs, task-scout) with project-specific values.
 5. **ALWAYS verify the scaffold succeeded** by checking that key files exist before reporting success.
 6. **Use the project root directory** (current working directory) for scaffolding unless the user specifies otherwise.
 7. **Respect user choice** — if the user wants a specific stack or tool, use it even if you would recommend differently.

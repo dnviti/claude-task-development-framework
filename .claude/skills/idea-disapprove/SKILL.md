@@ -15,10 +15,10 @@ Always respond and work in English.
 ## Current State
 
 ### Ideas available for disapproval:
-!`grep -E '^IDEA-[0-9]{3}' ideas.txt 2>/dev/null | tr -d '\r'`
+!`python3 scripts/task_manager.py list-ideas --file ideas --format summary`
 
 ### Already disapproved ideas:
-!`grep -E '^IDEA-[0-9]{3}' idea-disapproved.txt 2>/dev/null | tr -d '\r'`
+!`python3 scripts/task_manager.py list-ideas --file disapproved --format summary`
 
 ## Arguments
 
@@ -35,7 +35,11 @@ If `ideas.txt` has no ideas, inform the user: "No ideas available for disapprova
 
 ### Step 2: Show the Full Idea
 
-Read the complete idea block from `ideas.txt` (everything between its `------` separator lines). Present it to the user so they can review what they are disapproving.
+Get the full parsed idea data:
+```bash
+python3 scripts/task_manager.py parse IDEA-NNN
+```
+Present the idea fields (title, category, description, motivation) to the user so they can review what they are disapproving.
 
 ### Step 3: Ask for the Disapproval Reason
 
@@ -64,7 +68,7 @@ Options:
 
 ### Step 5: Move the Idea
 
-**5a. Read the full idea block** from `ideas.txt` (everything between `------` separators, inclusive).
+**5a.** The `parse` output from Step 2 contains the `raw` field with the full block text.
 
 **5b. Add the disapproval field** to the block. Insert a `REJECTION REASON:` line after the `MOTIVATION:` section:
 
@@ -77,7 +81,8 @@ Options:
 Use `Edit` to append the block (with `REJECTION REASON:` added) at the end of `idea-disapproved.txt`.
 
 **5d. Remove the idea from `ideas.txt`:**
-Use `Edit` to remove the entire original idea block from `ideas.txt`. Clean up any extra blank lines left behind.
+Run: `python3 scripts/task_manager.py remove IDEA-NNN --file ideas.txt`
+This cleanly removes the block and handles whitespace cleanup automatically.
 
 ### Step 6: Confirm and Report
 

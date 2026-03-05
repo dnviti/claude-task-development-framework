@@ -13,19 +13,19 @@ You are a documentation manager for this project. Your job is to create, update,
 ## Current Documentation State
 
 ### Existing docs/ files:
-!`ls -1 docs/*.md 2>/dev/null || echo "(none — docs/ directory does not exist yet)"`
+!`python3 scripts/task_manager.py find-files --patterns "*.md" --max-depth 2 --limit 20`
 
 ### README.md:
-!`test -f README.md && echo "Exists ($(wc -l < README.md) lines)" || echo "Missing"`
+!`python3 -c "from pathlib import Path; p=Path('README.md'); print(f'Exists ({len(p.read_text().splitlines())} lines)') if p.exists() else print('Missing')"`
 
 ### Files changed in last 5 commits:
-!`git diff --name-only HEAD~5..HEAD 2>/dev/null | sort -u`
+!`git diff --name-only HEAD~5..HEAD 2>&1 || echo "(no recent commits)"`
 
 ### In-progress tasks:
-!`grep '^\[~\]' progressing.txt 2>/dev/null | tr -d '\r'`
+!`python3 scripts/task_manager.py list --status progressing --format summary`
 
-### Recently completed tasks (last 5):
-!`grep '^\[x\]' done.txt 2>/dev/null | tail -5 | tr -d '\r'`
+### Recently completed tasks:
+!`python3 scripts/task_manager.py list --status done --format summary`
 
 ## Arguments
 
@@ -53,7 +53,7 @@ Operations:
   claude-md  — Update CLAUDE.md to reflect current codebase state
 
 Categories (for create/update/verify):
-  [Define your project-specific categories here]
+  [DOC_CATEGORIES]
   all        — All categories (default)
 
 Examples:

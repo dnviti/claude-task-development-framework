@@ -16,14 +16,11 @@ Always respond and work in English. The idea block content (field labels, descri
 
 ## Current Idea State
 
-### Highest idea IDs in ideas.txt:
-!`grep -ohE 'IDEA-[0-9]{3}' ideas.txt 2>/dev/null | sort -t'-' -k2 -n | tail -10`
-
-### Highest idea IDs in idea-disapproved.txt:
-!`grep -ohE 'IDEA-[0-9]{3}' idea-disapproved.txt 2>/dev/null | sort -t'-' -k2 -n | tail -10`
+### Next available idea ID:
+!`python3 scripts/task_manager.py next-id --type idea`
 
 ### Current ideas:
-!`grep -E '^IDEA-[0-9]{3}' ideas.txt 2>/dev/null | tr -d '\r'`
+!`python3 scripts/task_manager.py list-ideas --file ideas --format summary`
 
 ## Arguments
 
@@ -43,30 +40,17 @@ Do NOT proceed without a clear idea description.
 
 Analyze the idea description and select an appropriate category.
 
-**Suggested categories** (adapt to your project):
+**Suggested categories** (tailored to this project):
 
-| Category | Domain |
-|----------|--------|
-| `Core Features` | Primary functionality, core workflows |
-| `User Interface` | General UI improvements, UX, accessibility |
-| `Security` | Security, authentication, encryption |
-| `Integration` | External integrations, APIs, import/export |
-| `Collaboration` | Sharing, teams, multi-user features |
-| `Performance` | Optimization, caching, scaling |
-| `Infrastructure` | DevOps, CI/CD, deployment, Docker |
-| `Monitoring` | Logging, analytics, notifications |
-| `Automation` | Automation, scripting, scheduled tasks |
+[IDEA_CATEGORIES]
 
 If no existing category fits well, create a concise new one.
 
+*The category table above is configured by `/project-initialization`. If not yet configured, use generic categories: Core Features, User Interface, Security, Integration, Performance, Infrastructure.*
+
 ### Step 3: Compute the Next Idea Number
 
-Idea numbering is **globally sequential** across `ideas.txt` and `idea-disapproved.txt`.
-
-1. From the "Highest idea IDs" data above, extract all numeric parts (e.g., `IDEA-005` -> 5).
-2. Find the maximum number across both files.
-3. The new idea number = `max + 1`, zero-padded to 3 digits.
-4. If no ideas exist yet, start at `IDEA-001`.
+Use the `next_number` field from the "Next available idea ID" JSON above. No manual computation needed — the script handles global sequencing across both idea files.
 
 ### Step 4: Draft the Idea Block
 
@@ -115,12 +99,9 @@ Then use `AskUserQuestion` with these options:
 
 Before writing, perform a duplicate check:
 
-1. Search all idea and task files for key concepts:
-   ```
-   grep -i "keyword1" ideas.txt idea-disapproved.txt to-do.txt progressing.txt done.txt
-   grep -i "keyword2" ideas.txt idea-disapproved.txt to-do.txt progressing.txt done.txt
-   ```
-2. If a similar idea or task is found, warn the user and ask whether to proceed or abort.
+1. Run: `python3 scripts/task_manager.py duplicates --keywords "keyword1,keyword2,keyword3"`
+   Use 2-3 key terms from the idea title and description as keywords.
+2. If the JSON output contains matches that look like a similar idea or task, warn the user and ask whether to proceed or abort.
 3. If no duplicates found, continue to Step 7.
 
 ### Step 7: Append the Idea to ideas.txt

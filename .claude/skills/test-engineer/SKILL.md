@@ -16,19 +16,28 @@ Always respond and work in English, even if the user's prompt is written in anot
 
 The user invoked with: **$ARGUMENTS**
 
+## Project Test Configuration
+
+> - **Test Framework**: [TEST_FRAMEWORK]
+> - **Test Command**: `[TEST_COMMAND]`
+> - **Test File Pattern**: `[TEST_FILE_PATTERN]`
+> - **CI Runtime**: [CI_RUNTIME_SETUP]
+
+*Placeholders above are configured by `/project-initialization`. If not yet configured, detect from CLAUDE.md and project config files.*
+
 ## Existing Test Infrastructure
 
 ### Test config files:
-!`find . -maxdepth 3 -name "vitest.config.*" -o -name "jest.config.*" -o -name "pytest.ini" -o -name "pyproject.toml" -o -name ".mocharc.*" 2>/dev/null | head -20 || echo "(none found)"`
+!`python3 scripts/task_manager.py find-files --patterns "vitest.config.*,jest.config.*,pytest.ini,pyproject.toml,.mocharc.*" --max-depth 3 --limit 20`
 
 ### Existing test files:
-!`find . -maxdepth 5 -name "*.test.*" -o -name "*.spec.*" -o -name "test_*" 2>/dev/null | head -30 || echo "(none found)"`
+!`python3 scripts/task_manager.py find-files --patterns "*.test.*,*.spec.*,test_*" --max-depth 5 --limit 30`
 
 ### Test scripts in package.json (if applicable):
-!`grep -E '"test' package.json 2>/dev/null || echo "(no package.json or no test scripts)"`
+!`python3 -c "import json, sys; d=json.load(open('package.json')); [print(f'  {k}: {v}') for k,v in d.get('scripts',{}).items() if 'test' in k]" 2>/dev/null || echo "(no package.json or no test scripts)"`
 
 ### GitHub Actions workflows:
-!`ls .github/workflows/*.yml 2>/dev/null || echo "(none found)"`
+!`python3 scripts/task_manager.py find-files --patterns "*.yml,*.yaml" --max-depth 3 --limit 10`
 
 ## Your Core Responsibilities
 
@@ -48,13 +57,16 @@ Before writing any tests, explore the project structure to understand:
 
 ## Testing Strategy & Standards
 
-### Test Framework Selection
+### Test Framework
 
-Choose the appropriate test framework based on the project's tech stack. Common choices:
-- **JavaScript/TypeScript**: Vitest, Jest, Mocha, Playwright
-- **Python**: pytest, unittest
-- **Go**: built-in testing package
-- **Rust**: built-in testing + cargo test
+This project uses **[TEST_FRAMEWORK]**. Run tests with:
+```bash
+[TEST_COMMAND]
+```
+
+Test files follow the pattern: `[TEST_FILE_PATTERN]`
+
+*If the placeholders above have not been replaced yet, choose the appropriate test framework based on the project's tech stack (read CLAUDE.md and project config files).*
 
 ### Test Categories & What to Test
 
@@ -106,12 +118,24 @@ on:
 
 jobs:
   quality:
-    # Typecheck + Lint + Security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      [CI_RUNTIME_SETUP]
+      # Typecheck + Lint + Security audit
   test:
-    # Unit + integration tests with service containers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      [CI_RUNTIME_SETUP]
+      # Unit + integration tests with service containers
   build:
-    # Full build verification
+    runs-on: ubuntu-latest
     needs: [quality, test]
+    steps:
+      - uses: actions/checkout@v4
+      [CI_RUNTIME_SETUP]
+      # Full build verification
 ```
 
 ### Pipeline Rules

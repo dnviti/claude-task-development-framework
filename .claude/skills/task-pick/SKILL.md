@@ -19,17 +19,17 @@ Tasks are split across three files by status:
 
 ## Current Task State
 
-### In-progress tasks (from progressing.txt):
-!`grep '^\[~\]' progressing.txt 2>/dev/null | tr -d '\r'`
+### In-progress tasks:
+!`python3 scripts/task_manager.py list --status progressing --format summary`
 
-### Pending tasks (from to-do.txt):
-!`grep '^\[ \]' to-do.txt | tr -d '\r'`
+### Pending tasks:
+!`python3 scripts/task_manager.py list --status todo --format summary`
 
-### Completed tasks (from done.txt):
-!`grep '^\[x\]' done.txt 2>/dev/null | tr -d '\r'`
+### Completed tasks:
+!`python3 scripts/task_manager.py list --status done --format summary`
 
 ### Recommended implementation order:
-!`grep -A 50 'RECOMMENDED IMPLEMENTATION ORDER' to-do.txt 2>/dev/null | tr -d '\r'`
+!`python3 scripts/task_manager.py sections --file to-do.txt`
 
 ## Instructions
 
@@ -50,17 +50,20 @@ Read `progressing.txt` and identify all tasks marked `[~]`. If there are none, s
 
 **0b. For each in-progress task (in order), verify implementation:**
 
-Read the full task block from `progressing.txt` (everything between its `------` separator lines).
+First, get the full parsed task data and file existence report:
+```
+python3 scripts/task_manager.py parse TASK-CODE
+python3 scripts/task_manager.py verify-files TASK-CODE
+```
 
-Extract two key sections:
-- **Files involved** — the list of files to CREATE and MODIFY
-- **TECHNICAL DETAILS** — the technical implementation details
+The `parse` command returns all task fields as JSON (description, technical_details, files_create, files_modify).
+The `verify-files` command checks whether each file in "Files involved" exists and returns a JSON report with `all_exist` boolean.
 
-Perform these verification checks:
+Then perform deeper verification checks:
 
 1. **File existence checks:**
-   - For each file marked **CREATE**: Use `Glob` to check if the file exists at the specified path. If not found at the exact path, search for the filename in nearby directories (implementations may use slightly different paths).
-   - For each file marked **MODIFY**: Verify the file exists.
+   - Review the `verify-files` JSON output. For any file marked `"exists": false`, search for the filename in nearby directories (implementations may use slightly different paths).
+   - For files that exist, proceed to content checks.
 
 2. **Implementation content checks:**
    - For files marked **CREATE**: Read the file and verify it contains meaningful implementation (not empty or stub-only). Check for key exports, components, or functions described in TECHNICAL DETAILS.
@@ -91,9 +94,9 @@ Perform these verification checks:
      Run your project's start command using the Bash tool with `run_in_background: true`.
 
      **2b. Wait for startup and check ports:**
-     Wait 8 seconds (`sleep 8`), then verify dev ports are listening:
+     Wait for startup and verify dev ports are listening:
      ```bash
-     lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | grep -E ":(DEV_PORTS)"
+     python3 scripts/app_manager.py verify-ports --wait 8 --expect bound DEV_PORTS
      ```
 
      **2c. Check for startup errors:**
@@ -110,16 +113,11 @@ Perform these verification checks:
      - **If no errors (or only false positives):** Proceed to 2e.
 
      **2e. Stop the application (MANDATORY — no processes must remain):**
-     Kill all processes on dev ports:
+     Kill all processes on dev ports and verify:
      ```bash
-     for port in [DEV_PORTS]; do
-       pid=$(lsof -iTCP:${port} -sTCP:LISTEN -t 2>/dev/null)
-       if [ -n "$pid" ]; then
-         kill -TERM "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
-       fi
-     done
+     python3 scripts/app_manager.py kill-ports DEV_PORTS
+     python3 scripts/app_manager.py verify-ports --wait 2 --expect free DEV_PORTS
      ```
-     Then verify all ports are free.
 
   3. Present the verification report to the user (including quality gate result and smoke-test result)
   4. **Run the Step 6 completion flow** (Testing Guide -> Confirm -> Close -> Commit) for this task
@@ -147,17 +145,22 @@ This step is only reached when there are NO in-progress tasks remaining in `prog
 
 ### Step 2: Move task to progressing.txt
 
-1. Read the full task block from `to-do.txt` — everything between its `------` separator lines (including the separators and all content).
-2. Remove that entire block from `to-do.txt`.
-3. Append the block to `progressing.txt` in the appropriate section.
-4. In the appended block, change `[ ]` to `[~]` in the header line.
-5. If the task appears in the recommended order section of `to-do.txt`, update its status annotation to `[IN PROGRESS]`.
+Run the move command:
+```bash
+python3 scripts/task_manager.py move TASK-CODE --to progressing
+```
 
-**Important:** The task block must be moved completely — do not leave a copy in to-do.txt.
+This automatically removes the block from `to-do.txt`, inserts it into `progressing.txt`, and updates the status symbol from `[ ]` to `[~]`. Verify the JSON output shows `"success": true`.
+
+If the task appears in the recommended order section of `to-do.txt`, update its status annotation to `[IN PROGRESS]`.
 
 ### Step 3: Read the full task details
 
-Read the complete task block from `progressing.txt` for the selected task — everything between its `------` separator lines: priority, dependencies, description, technical details, and files involved.
+Get the full parsed task data:
+```bash
+python3 scripts/task_manager.py parse TASK-CODE
+```
+This returns all fields as structured JSON: priority, dependencies, description, technical_details, files_create, files_modify.
 
 ### Step 4: Explore the codebase
 
@@ -229,13 +232,13 @@ Use `AskUserQuestion` with options:
 
 Once the user confirms the work is done:
 
-1. Read the full task block from `progressing.txt` (everything between its `------` separator lines, inclusive)
-2. Remove the entire task block from `progressing.txt`
-3. Append the task block to `done.txt` at the end of the appropriate section
-4. In the appended block: change `[~]` to `[x]` in the header line
-5. Add a `COMPLETED:` line after the priority/dependencies lines with a brief English summary of what was implemented
-6. If the task appears in the recommended order section of `to-do.txt`, update its status annotation to `[COMPLETED]`
-7. Inform the user: "Task [TASK-CODE] has been moved to done.txt."
+1. Run the move command with a completion summary:
+   ```bash
+   python3 scripts/task_manager.py move TASK-CODE --to done --completed-summary "Brief summary of what was implemented"
+   ```
+   This automatically removes from `progressing.txt`, inserts into `done.txt`, updates `[~]` to `[x]`, and adds the `COMPLETED:` line.
+2. If the task appears in the recommended order section of `to-do.txt`, update its status annotation to `[COMPLETED]`
+3. Inform the user: "Task [TASK-CODE] has been moved to done.txt."
 
 **6d. Ask to commit:**
 

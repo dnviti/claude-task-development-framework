@@ -17,16 +17,10 @@ Always respond and work in English. Idea content in `ideas.txt` MUST remain in *
 ## Current State
 
 ### All ideas:
-!`grep -E '^IDEA-[0-9]{3}' ideas.txt 2>/dev/null | tr -d '\r'`
+!`python3 scripts/task_manager.py list-ideas --file ideas --format summary`
 
-### Completed tasks (for overlap detection):
-!`grep '^\[x\]' done.txt 2>/dev/null | tr -d '\r'`
-
-### In-progress tasks:
-!`grep '^\[~\]' progressing.txt 2>/dev/null | tr -d '\r'`
-
-### Pending tasks:
-!`grep '^\[ \]' to-do.txt 2>/dev/null | tr -d '\r'`
+### All tasks (for overlap detection):
+!`python3 scripts/task_manager.py list --status all --format summary`
 
 ## Arguments
 

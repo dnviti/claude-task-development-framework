@@ -11,13 +11,11 @@ You are a DevOps operator for this project. Your job is to cleanly stop the deve
 
 ## Current Environment State
 
-### Listening ports:
-!`lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | awk '{print $1, $2, $9}' | tail -20 || echo "No listening ports found"`
-
-> Cross-reference the ports above against the `DEV_PORTS` configured in CLAUDE.md to identify which belong to this project.
+### Dev port status (JSON — check DEV_PORTS in CLAUDE.md):
+!`python3 scripts/app_manager.py check-ports 3000 8080`
 
 ### Docker containers:
-!`docker ps --format "{{.Names}}: {{.Status}}" 2>/dev/null || echo "Docker not available or no containers running"`
+!`docker ps --format "{{.Names}}: {{.Status}}"`
 
 ## Arguments
 
@@ -38,16 +36,8 @@ Examine the environment state above. The app is considered "running" if **any** 
 
 ### Step 2: Kill dev server processes
 
-For each dev port, find the PID and kill it:
-
 ```bash
-for port in [DEV_PORTS]; do
-  pid=$(lsof -iTCP:${port} -sTCP:LISTEN -t 2>/dev/null)
-  if [ -n "$pid" ]; then
-    echo "Killing PID $pid (port $port)..."
-    kill -TERM "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
-  fi
-done
+python3 scripts/app_manager.py kill-ports [DEV_PORTS]
 ```
 
 ### Step 3: Verify processes are stopped
@@ -55,24 +45,17 @@ done
 Wait briefly, then confirm ports are free:
 
 ```bash
-sleep 2
-remaining=$(lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | grep -E ":(DEV_PORTS)" || true)
-if [ -n "$remaining" ]; then
-  echo "WARNING: Some ports still in use:"
-  echo "$remaining"
-else
-  echo "All dev server ports are free."
-fi
+python3 scripts/app_manager.py verify-ports --wait 2 --expect free [DEV_PORTS]
 ```
 
-If ports are still occupied, retry the kill one more time. If still occupied after retry, inform the user that manual intervention may be needed and show the PIDs.
+Check the JSON output. If `"all_match": false`, retry the kill one more time. If still occupied after retry, inform the user that manual intervention may be needed and show the PIDs from the JSON output.
 
 ### Step 4: Ask about Docker containers
 
 Check if Docker dev containers are running:
 
 ```bash
-docker ps --format "{{.Names}}: {{.Status}}" 2>/dev/null
+docker ps --format "{{.Names}}: {{.Status}}"
 ```
 
 **If Docker containers are running:**

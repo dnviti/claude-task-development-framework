@@ -13,17 +13,23 @@ You are an elite product strategist and feature researcher. You have deep knowle
 ## Current Project State
 
 ### In-progress tasks:
-!`grep '^\[~\]' progressing.txt 2>/dev/null | tr -d '\r'`
+!`python3 scripts/task_manager.py list --status progressing --format summary`
 
 ### Pending tasks:
-!`grep '^\[ \]' to-do.txt 2>/dev/null | tr -d '\r'`
+!`python3 scripts/task_manager.py list --status todo --format summary`
 
 ### Completed tasks:
-!`grep '^\[x\]' done.txt 2>/dev/null | tr -d '\r'`
+!`python3 scripts/task_manager.py list --status done --format summary`
 
 ## Arguments
 
 Focus area requested: **$ARGUMENTS**
+
+## Project Context
+
+[PROJECT_CONTEXT]
+
+*The context above is configured by `/project-initialization`. If not yet configured, analyze the codebase and CLAUDE.md to understand the project domain, stack, and audience.*
 
 ## Your Mission
 
@@ -58,14 +64,9 @@ Every time you are invoked, you must:
 
 Rotate through these categories across invocations to maintain diversity:
 
-- **Core Features**: Primary functionality improvements and extensions
-- **Security**: Authentication, authorization, encryption, audit logging
-- **Collaboration**: Sharing, team features, multi-user capabilities
-- **UX/Productivity**: Keyboard shortcuts, search, themes, accessibility
-- **Integration**: External APIs, import/export, webhooks, plugins
-- **Performance**: Caching, optimization, lazy loading, compression
-- **Monitoring & Ops**: Logging, analytics, health checks, notifications
-- **Developer Experience**: Testing, documentation, CI/CD, debugging tools
+[SCOUT_CATEGORIES]
+
+*The categories above are configured by `/project-initialization`. If not yet configured, use generic categories: Core Features, Security, UX/Productivity, Integration, Performance, Monitoring & Ops, Developer Experience.*
 
 ## Output Format
 

@@ -11,13 +11,11 @@ You are a DevOps operator for this project. Your job is to start the development
 
 ## Current Environment State
 
-### Listening ports:
-!`lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | awk '{print $1, $2, $9}' | tail -20 || echo "No listening ports found"`
-
-> Cross-reference the ports above against the `DEV_PORTS` configured in CLAUDE.md to identify which belong to this project.
+### Dev port status (JSON — check DEV_PORTS in CLAUDE.md):
+!`python3 scripts/app_manager.py check-ports 3000 8080`
 
 ### Docker containers:
-!`docker ps --format "{{.Names}}: {{.Status}}" 2>/dev/null || echo "Docker not available or no containers running"`
+!`docker ps --format "{{.Names}}: {{.Status}}"`
 
 ## Arguments
 
@@ -45,32 +43,14 @@ Examine the environment state above. The app is considered "running" if **any** 
 
 ### Step 2: Stop existing processes (only if restarting)
 
-Kill all processes on dev ports. For each configured port, run:
+Kill all processes on dev ports and verify:
 
 ```bash
-for port in [DEV_PORTS]; do
-  pid=$(lsof -iTCP:${port} -sTCP:LISTEN -t 2>/dev/null)
-  if [ -n "$pid" ]; then
-    echo "Killing PID $pid (port $port)..."
-    kill -TERM "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
-  fi
-done
+python3 scripts/app_manager.py kill-ports [DEV_PORTS]
+python3 scripts/app_manager.py verify-ports --wait 2 --expect free [DEV_PORTS]
 ```
 
-After killing, wait 2 seconds then verify all ports are free:
-
-```bash
-sleep 2
-still_used=$(lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | grep -E ":(DEV_PORTS)" || true)
-if [ -n "$still_used" ]; then
-  echo "WARNING: Some ports still in use after kill:"
-  echo "$still_used"
-else
-  echo "All ports are free."
-fi
-```
-
-If ports are still occupied after 3 retries (kill + 2s wait), inform the user and stop.
+Check the `verify-ports` JSON output. If `"all_match": false`, retry the kill once more. If still occupied after 2 retries, inform the user and stop.
 
 ### Step 3: Run pre-start setup (if applicable)
 
@@ -102,14 +82,9 @@ Run the start command using the Bash tool with `run_in_background: true`:
 
 After starting the background process:
 
-1. **Wait 8 seconds** for initial startup:
+1. **Wait for startup and check that ports are bound** — verify dev ports are now listening:
    ```bash
-   sleep 8
-   ```
-
-2. **Check that ports are bound** — verify dev ports are now listening:
-   ```bash
-   lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | grep -E ":(DEV_PORTS)"
+   python3 scripts/app_manager.py verify-ports --wait 8 --expect bound [DEV_PORTS]
    ```
 
 3. **Check Docker containers are healthy** (if applicable):

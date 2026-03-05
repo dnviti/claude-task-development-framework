@@ -11,13 +11,11 @@ You are a DevOps operator for this project. Your job is to cleanly restart the d
 
 ## Current Environment State
 
-### Listening ports:
-!`lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | awk '{print $1, $2, $9}' | tail -20 || echo "No listening ports found"`
-
-> Cross-reference the ports above against the `DEV_PORTS` configured in CLAUDE.md to identify which belong to this project.
+### Dev port status (JSON — check DEV_PORTS in CLAUDE.md):
+!`python3 scripts/app_manager.py check-ports 3000 8080`
 
 ### Docker containers:
-!`docker ps --format "{{.Names}}: {{.Status}}" 2>/dev/null || echo "Docker not available or no containers running"`
+!`docker ps --format "{{.Names}}: {{.Status}}"`
 
 ## Arguments
 
@@ -29,33 +27,14 @@ The user invoked with: **$ARGUMENTS**
 
 Regardless of whether the app appears to be running, perform a clean stop to ensure no stale processes remain.
 
-**Kill all processes on dev ports:**
+**Kill all processes on dev ports and verify:**
 
 ```bash
-for port in [DEV_PORTS]; do
-  pid=$(lsof -iTCP:${port} -sTCP:LISTEN -t 2>/dev/null)
-  if [ -n "$pid" ]; then
-    echo "Killing PID $pid (port $port)..."
-    kill -TERM "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
-  fi
-done
+python3 scripts/app_manager.py kill-ports [DEV_PORTS]
+python3 scripts/app_manager.py verify-ports --wait 2 --expect free [DEV_PORTS]
 ```
 
-**Verify ports are free:**
-
-```bash
-sleep 2
-remaining=$(lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | grep -E ":(DEV_PORTS)" || true)
-if [ -n "$remaining" ]; then
-  echo "WARNING: Ports still in use, retrying..."
-  echo "$remaining" | awk '{print $2}' | sort -u | while read pid; do
-    [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null || true
-  done
-  sleep 2
-fi
-```
-
-If ports are still occupied after 2 retries, inform the user and stop.
+If `"all_match": false` in the JSON output, retry the kill once more. If still occupied after 2 retries, inform the user and stop.
 
 ### Step 2: Run pre-start setup (if applicable)
 
@@ -80,14 +59,9 @@ Run the start command with `run_in_background: true`:
 
 ### Step 4: Monitor startup for errors
 
-1. **Wait 8 seconds** for startup:
+1. **Wait for startup and verify ports are bound:**
    ```bash
-   sleep 8
-   ```
-
-2. **Verify ports are bound:**
-   ```bash
-   lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | grep -E ":(DEV_PORTS)"
+   python3 scripts/app_manager.py verify-ports --wait 8 --expect bound [DEV_PORTS]
    ```
 
 3. **Check Docker health** (if applicable):

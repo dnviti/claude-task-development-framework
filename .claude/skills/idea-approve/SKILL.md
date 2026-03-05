@@ -17,16 +17,13 @@ Always respond and work in English. The task block content (field labels, descri
 ## Current State
 
 ### Ideas available for approval:
-!`grep -E '^IDEA-[0-9]{3}' ideas.txt 2>/dev/null | tr -d '\r'`
+!`python3 scripts/task_manager.py list-ideas --file ideas --format summary`
 
-### Highest task IDs (last 20, sorted by number):
-!`grep -rohE '[A-Z][A-Z0-9]+-[0-9]{3}' to-do.txt progressing.txt done.txt 2>/dev/null | sort -t'-' -k2 -n | tail -20`
-
-### All task prefixes currently in use:
-!`grep -rohE '[A-Z][A-Z0-9]+-[0-9]{3}' to-do.txt progressing.txt done.txt 2>/dev/null | sed 's/-[0-9]*//' | sort -u`
+### Next available task ID and existing prefixes:
+!`python3 scripts/task_manager.py next-id --type task`
 
 ### Section headers in to-do.txt:
-!`grep -n 'SECTION [A-Z]' to-do.txt | tr -d '\r'`
+!`python3 scripts/task_manager.py sections --file to-do.txt`
 
 ## Arguments
 
@@ -43,11 +40,11 @@ If `ideas.txt` has no ideas, inform the user: "No ideas available for approval. 
 
 ### Step 2: Read the Full Idea
 
-Read the complete idea block from `ideas.txt` — everything between its `------` separator lines. Extract:
-- Title
-- Category
-- DESCRIPTION
-- MOTIVATION
+Get the full parsed idea data:
+```bash
+python3 scripts/task_manager.py parse IDEA-NNN
+```
+This returns all fields as JSON: title, category, date, description, motivation.
 
 Present the idea to the user as context for what will be converted.
 
@@ -63,12 +60,7 @@ Analyze the idea's description and category to select an appropriate task prefix
 
 ### Step 4: Compute the Next Task Number
 
-Task numbering is **globally sequential** across all prefixes and all three task files.
-
-1. From the "Highest task IDs" data above, extract all numeric parts.
-2. **Ignore false positives** like `AES-256` or `SHA-256`.
-3. Find the maximum number.
-4. The new task number = `max + 1`, zero-padded to 3 digits.
+Use the `next_number` field from the "Next available task ID" JSON above. The `prefixes` array shows existing domain prefixes. No manual computation needed.
 
 ### Step 5: Explore the Codebase
 
@@ -97,7 +89,8 @@ Convert the idea into a complete task block, expanding the high-level idea with 
   and the scope. Approximately 4-10 lines.
 
   TECHNICAL DETAILS:
-  Detailed technical implementation plan, structured by layer/file.
+  Detailed technical implementation plan. Structure by layer/file:
+[TECH_DETAIL_LAYERS]
   This section is NEW — the original idea did not have this.
   Include specific code snippets, function signatures, endpoint paths.
 
@@ -132,30 +125,23 @@ Then use `AskUserQuestion` with these options:
 
 ### Step 8: Check for Duplicates
 
-Search all task files for key concepts:
-```
-grep -i "keyword1" to-do.txt progressing.txt done.txt
-grep -i "keyword2" to-do.txt progressing.txt done.txt
-```
+Run: `python3 scripts/task_manager.py duplicates --keywords "keyword1,keyword2,keyword3" --files "to-do.txt,progressing.txt,done.txt"`
 
-If a similar task exists, warn the user and ask whether to proceed or abort.
+Use 2-3 key terms from the task title and description. If the JSON output contains matches that look like a similar task, warn the user and ask whether to proceed or abort.
 
 ### Step 9: Insert the Task and Remove the Idea
 
 This step performs TWO operations:
 
 **9a. Add the task to `to-do.txt`:**
-1. Use `grep -n` to find the target section header and the next section header.
+1. Use the section data from the "Section headers" JSON above to find the target section's line number.
 2. Find the last task block in the section.
-3. Insert the new task block after the last existing task.
+3. Insert the new task block after the last existing task using the `Edit` tool.
 4. Maintain whitespace conventions: two blank lines between tasks.
 
 **9b. Remove the idea from `ideas.txt`:**
-1. Find the idea block in `ideas.txt` (everything between its `------` separators, inclusive).
-2. Remove the entire block from `ideas.txt`.
-3. Clean up any extra blank lines left behind.
-
-Use the `Edit` tool for both operations.
+Run: `python3 scripts/task_manager.py remove IDEA-NNN --file ideas.txt`
+This cleanly removes the idea block and handles whitespace cleanup automatically.
 
 ### Step 10: Confirm and Report
 

@@ -67,6 +67,14 @@ Ideas are stored separately from tasks and must be explicitly approved before en
 
 Use `/idea-create` to add ideas, `/idea-approve` to promote an idea to a task, `/idea-refactor` to update ideas based on codebase changes, and `/idea-disapprove` to reject an idea. Ideas must never be picked up directly by `/task-pick`.
 
+## Cross-Platform Notes
+
+This framework supports **Windows, macOS, and Linux** with automatic OS detection.
+
+- **Python command:** All scripts and skills reference `python3`. On Windows where only `python` is available, substitute `python` for `python3` in all commands. Windows users should also update the `python3` reference in `.claude/settings.json` to `python`.
+- **Port management:** `scripts/app_manager.py` automatically uses the correct OS tools — `lsof`/`ss` on Unix, `netstat`/`taskkill` on Windows.
+- **File search:** `scripts/task_manager.py find-files` provides cross-platform file discovery (replaces Unix `find`).
+
 ### File Naming Conventions
 
 <!-- [TODO: Define your project's file naming conventions] -->

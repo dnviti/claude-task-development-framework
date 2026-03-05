@@ -8,15 +8,18 @@ claude-task-development-framework gives your AI-assisted development workflow a 
 
 - **Two-pipeline workflow** — separate idea evaluation from task execution
 - **17 built-in skills** — slash commands for every stage of the development lifecycle
+- **Adaptive project initialization** — `/project-initialization` scaffolds your project and tailors all skills to your chosen stack, domain, and architecture
 - **Plain-text tracking** — tasks and ideas live in simple `.txt` files, fully version-controllable
 - **Automated hooks** — file edits automatically surface related tasks and progress summaries
 - **Quality gates** — verification, linting, and smoke tests run before tasks can be closed
+- **Cross-platform** — works on Linux, macOS, and Windows with automatic OS detection
 - **Project-agnostic** — works with any language, framework, or tech stack
 - **Human-in-the-loop** — AI assists, but you make every decision
 
 ## Prerequisites
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and configured
+- Python 3 (used by the bundled scripts)
 
 ## Getting Started
 
@@ -37,13 +40,11 @@ claude-task-development-framework gives your AI-assisted development workflow a 
    cp claude-task-development-framework/CLAUDE.md your-project/
    ```
 
-2. **Initialize your project** — run `/project-initialization` to interactively choose a tech stack, scaffold the project, set up git with `main`/`develop` branches, and auto-configure all skills. Or manually customize `CLAUDE.md` — fill in the TODO sections with your project's development commands, environment setup, architecture, and file naming conventions.
+2. **Initialize your project** — run `/project-initialization` to interactively choose a tech stack, scaffold the project, set up git with `main`/`develop` branches, and auto-configure all skills to match your project. Or manually customize `CLAUDE.md` — fill in the TODO sections with your project's development commands, environment setup, architecture, and file naming conventions.
 
 3. **Customize `to-do.txt`** — update the project name in the header and define your section structure (e.g., SECTION A — Core Features, SECTION B — Enhancements).
 
-4. **Customize `scripts/task-manager.sh`** — populate the `FILE_TASK_MAP` and `TASK_NAMES` associative arrays as you create tasks.
-
-5. **Start Claude Code** in your project directory and use the slash commands:
+4. **Start Claude Code** in your project directory and use the slash commands:
 
    ```
    /idea-create Add user authentication with JWT
@@ -101,7 +102,7 @@ to-do.txt [ ]  ──→  progressing.txt [~]  ──→  done.txt [x]
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
-| `/project-initialization` | `/project-initialization [purpose]` | Initialize a new project: choose stack, scaffold, configure git (main + develop branches), set up `.gitignore`, and wire up all skills |
+| `/project-initialization` | `/project-initialization [purpose]` | Initialize a new project: choose stack, scaffold, configure git, and adapt all skills to your project |
 
 ### Development Operations
 
@@ -118,7 +119,22 @@ to-do.txt [ ]  ──→  progressing.txt [~]  ──→  done.txt [x]
 | `/docs` | `/docs <operation> [category]` | Manage documentation (create, update, verify, sync, claude-md) |
 | `/test-engineer` | `/test-engineer [scope] [target]` | Create, update, or optimize tests and CI/CD pipelines |
 | `/security-audit` | `/security-audit [scope]` | Perform security audits and generate detailed reports |
-| `/github-pages-updater` | `/github-pages-updater` | Update GitHub Pages documentation |
+| `/github-pages-updater` | `/github-pages-updater` | Create or update a GitHub Pages landing site for the project |
+
+## Adaptive Skill Configuration
+
+When you run `/project-initialization`, it doesn't just scaffold your project — it personalizes the entire skill ecosystem to match your chosen stack and domain. The following skills are adapted with project-specific values:
+
+| Skill | What gets configured |
+|-------|---------------------|
+| **app-start / stop / restart** | Dev ports, start command, pre-dev setup command |
+| **test-engineer** | Test framework, test command, file patterns, CI/CD runtime setup |
+| **task-create / idea-approve** | Architecture layer names for task templates |
+| **idea-create** | Domain-specific idea categories |
+| **docs** | Project-specific documentation categories |
+| **task-scout** | Project context (domain, stack, audience) and research categories |
+
+Skills that are already dynamic (task-pick, task-continue, task-status, idea-refactor, idea-disapprove, github-pages-updater) read from CLAUDE.md and the codebase at runtime, so they adapt automatically without needing placeholders.
 
 ## Task Format
 
@@ -196,33 +212,27 @@ You can also create tasks directly with `/task-create` if you don't need the ide
 
 Use `/task-status` at any time to see your current progress and what to work on next.
 
+## Scripts
+
+The framework includes two Python scripts (zero external dependencies, stdlib only):
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/task_manager.py` | Task/idea file parsing, ID generation, duplicate checking, block movement, file-to-task correlation (used by the post-edit hook) |
+| `scripts/app_manager.py` | Cross-platform port checking, process management for dev server lifecycle |
+
+The post-edit hook in `.claude/settings.json` automatically runs `task_manager.py` whenever a file is edited, surfacing related in-progress tasks and a progress summary.
+
 ## Customization
 
 ### CLAUDE.md
 
-Fill in the TODO sections to match your project:
+Fill in the TODO sections to match your project (or let `/project-initialization` do it automatically):
 
-- **Development Commands** — your `dev`, `build`, `test`, and `verify` commands
+- **Development Commands** — your `dev`, `build`, `test`, and `verify` commands, plus `DEV_PORTS`, `START_COMMAND`, `PREDEV_COMMAND`, `VERIFY_COMMAND`
 - **Environment Setup** — how to install dependencies and configure env vars
 - **Architecture** — your project's structure and key patterns
 - **File Naming Conventions** — your naming rules by layer
-
-### task-manager.sh
-
-Populate the two maps in `scripts/task-manager.sh` as you create tasks:
-
-```bash
-declare -A FILE_TASK_MAP=(
-  ["auth.service.ts"]="AUTH-001"
-  ["LoginPage.tsx"]="AUTH-001"
-)
-
-declare -A TASK_NAMES=(
-  ["AUTH-001"]="User authentication"
-)
-```
-
-This enables the post-edit hook to surface related tasks automatically.
 
 ### Adding New Skills
 
@@ -238,12 +248,17 @@ The SKILL.md frontmatter defines the skill metadata:
 ---
 name: my-skill
 description: What this skill does
-allowed-tools: Bash, Read, Grep, Glob, Edit, Write
 argument-hint: "[arguments]"
 ---
 ```
 
 Then invoke it with `/my-skill` in Claude Code.
+
+## Cross-Platform Notes
+
+- **Python command:** All scripts and skills reference `python3`. On Windows where only `python` is available, substitute `python` for `python3` in all commands and update the reference in `.claude/settings.json`.
+- **Port management:** `scripts/app_manager.py` automatically uses the correct OS tools — `lsof`/`ss` on Unix, `netstat`/`taskkill` on Windows.
+- **File search:** `scripts/task_manager.py find-files` provides cross-platform file discovery.
 
 ## Project Structure
 
@@ -257,7 +272,8 @@ claude-task-development-framework/
 ├── ideas.txt                    # Ideas awaiting evaluation
 ├── idea-disapproved.txt         # Rejected ideas archive
 ├── scripts/
-│   └── task-manager.sh          # Post-edit hook: surfaces related tasks
+│   ├── task_manager.py          # Task/idea management CLI and post-edit hook
+│   └── app_manager.py           # Cross-platform port and process management
 └── .claude/
     ├── settings.json            # Hook configuration
     └── skills/                  # 17 Claude Code skills
@@ -270,14 +286,14 @@ claude-task-development-framework/
         ├── idea-approve/        # Promote ideas to tasks
         ├── idea-disapprove/     # Reject ideas
         ├── idea-refactor/       # Update ideas
-        ├── project-initialization/ # Initialize new projects
+        ├── project-initialization/ # Initialize and configure projects
         ├── app-start/           # Start dev environment
         ├── app-stop/            # Stop dev processes
         ├── app-restart/         # Restart dev environment
         ├── docs/                # Manage documentation
         ├── test-engineer/       # Manage tests and CI/CD
         ├── security-audit/      # Security audits
-        └── github-pages-updater/# Update GitHub Pages
+        └── github-pages-updater/# GitHub Pages site management
 ```
 
 ## License

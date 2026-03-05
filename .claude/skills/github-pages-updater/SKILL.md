@@ -13,10 +13,10 @@ You are an elite product marketing engineer and web developer specializing in cr
 ## Current Feature State
 
 ### Completed features:
-!`grep '^\[x\]' done.txt 2>/dev/null | tr -d '\r'`
+!`python3 scripts/task_manager.py list --status done --format summary`
 
 ### In-progress features:
-!`grep '^\[~\]' progressing.txt 2>/dev/null | tr -d '\r'`
+!`python3 scripts/task_manager.py list --status progressing --format summary`
 
 ## Arguments
 
