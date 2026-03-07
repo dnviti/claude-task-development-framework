@@ -275,6 +275,14 @@ Based on the detected project configuration, update the following skill files by
   - **Developer Experience**: Testing, documentation, CI/CD, debugging tools
   ```
 
+**`.claude/skills/release/SKILL.md`:**
+- `[PACKAGE_JSON_PATHS]` — Space-separated list of all manifest files that contain a version to bump. Detect by searching for `package.json`, `Cargo.toml`, `pyproject.toml` in the project root and workspace directories (excluding `node_modules`, `target`, `.venv`). Example for npm monorepo: `package.json server/package.json client/package.json`. Example for Python: `pyproject.toml`.
+- `[CHANGELOG_FILE]` — Path to the changelog file. Default: `CHANGELOG.md`. If it does not exist, create it with the [Keep a Changelog](https://keepachangelog.com/) boilerplate template.
+- `[TAG_PREFIX]` — Git tag prefix for version tags. Default: `v`. Check existing tags (`git tag -l`) and use the detected prefix if tags already exist.
+- `[GITHUB_REPO_URL]` — Base repository URL for changelog comparison links. Detect from `git remote get-url origin` or `package.json` `repository.url`. Convert SSH URLs (`git@github.com:user/repo.git`) to HTTPS (`https://github.com/user/repo`).
+- `[RELEASE_BRANCH]` — Branch from which releases are cut. Use `develop` if that branch exists, otherwise `main`.
+- `[PUBLISH_SKILL]` — Always `/git-publish`.
+
 ### Step 7: Orientation Report
 
 Present a comprehensive report to the user:
@@ -320,6 +328,7 @@ The following skills are now configured for your project:
 - `/idea-create` — project-relevant idea categories
 - `/docs` — documentation with project-specific categories
 - `/task-scout` — feature scouting tuned to your project domain
+- `/release` — semantic versioning, changelog generation, and git tagging
 ```
 
 ## Important Rules
@@ -327,7 +336,7 @@ The following skills are now configured for your project:
 1. **NEVER scaffold without explicit user confirmation** of both the stack and the scaffolding tool.
 2. **NEVER overwrite existing project files** — if the directory is not empty, warn the user and ask how to proceed.
 3. **ALWAYS update CLAUDE.md** with DEV_PORTS, START_COMMAND, PREDEV_COMMAND, and VERIFY_COMMAND after scaffolding.
-4. **ALWAYS update the app lifecycle skills** (app-start, app-stop, app-restart) **AND workflow skills** (test-engineer, task-create, idea-approve, idea-create, docs, task-scout) with project-specific values.
+4. **ALWAYS update the app lifecycle skills** (app-start, app-stop, app-restart) **AND workflow skills** (test-engineer, task-create, idea-approve, idea-create, docs, task-scout, release) with project-specific values.
 5. **ALWAYS verify the scaffold succeeded** by checking that key files exist before reporting success.
 6. **Use the project root directory** (current working directory) for scaffolding unless the user specifies otherwise.
 7. **Respect user choice** — if the user wants a specific stack or tool, use it even if you would recommend differently.
