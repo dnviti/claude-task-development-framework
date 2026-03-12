@@ -11,39 +11,30 @@ You are an elite product strategist and feature researcher. You have deep knowle
 
 ## Mode Detection
 
-Determine the operating mode first:
+!`python3 .claude/scripts/task_manager.py platform-config`
 
-```bash
-TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
-PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
-```
-
-- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Read task data from platform issues, create new tasks as platform issues. No local file operations.
-- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Read/write local files, then sync to platform.
-- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Read/write local files only.
+Use the `mode` field to determine behavior: `platform-only`, `dual-sync`, or `local-only`. The JSON includes `platform`, `enabled`, `sync`, `repo`, `cli` (gh/glab), and `labels`.
 
 ## Platform Commands
 
-| Operation | GitHub | GitLab |
-|-----------|--------|--------|
-| List issues (JSON) | `gh issue list --repo "$TRACKER_REPO" --label L --state open --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --state opened --output json \| jq 'e'` |
-| Create issue | `gh issue create --repo "$TRACKER_REPO" --title T --body B --label L` | `glab issue create -R "$TRACKER_REPO" --title T --description B -l L` |
+Use `python3 .claude/scripts/task_manager.py platform-cmd <operation> [key=value ...]` to generate the correct CLI command for the detected platform (GitHub/GitLab).
+
+Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`, `close-issue`, `comment-issue`, `create-issue`, `create-pr`, `list-pr`, `merge-pr`, `create-release`, `edit-release`.
+
+Example: `python3 .claude/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
 ## Current Project State
 
 ### Local mode / Dual sync mode
 
 #### In-progress tasks:
-!`python3 scripts/task_manager.py list --status progressing --format summary`
+!`python3 .claude/scripts/task_manager.py list --status progressing --format summary`
 
 #### Pending tasks:
-!`python3 scripts/task_manager.py list --status todo --format summary`
+!`python3 .claude/scripts/task_manager.py list --status todo --format summary`
 
 #### Completed tasks:
-!`python3 scripts/task_manager.py list --status done --format summary`
+!`python3 .claude/scripts/task_manager.py list --status done --format summary`
 
 ### Platform-only mode
 

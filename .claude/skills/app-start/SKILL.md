@@ -11,7 +11,7 @@ You are a DevOps operator for this project. Your job is to start the development
 ## Current Environment State
 
 ### Dev port status (JSON — check DEV_PORTS in CLAUDE.md):
-!`python3 scripts/app_manager.py check-ports 3000 8080`
+!`python3 .claude/scripts/app_manager.py check-ports 3000 8080`
 
 ### Docker containers:
 !`docker ps --format "{{.Names}}: {{.Status}}"`
@@ -45,8 +45,8 @@ Examine the environment state above. The app is considered "running" if **any** 
 Kill all processes on dev ports and verify:
 
 ```bash
-python3 scripts/app_manager.py kill-ports [DEV_PORTS]
-python3 scripts/app_manager.py verify-ports --wait 2 --expect free [DEV_PORTS]
+python3 .claude/scripts/app_manager.py kill-ports [DEV_PORTS]
+python3 .claude/scripts/app_manager.py verify-ports --wait 2 --expect free [DEV_PORTS]
 ```
 
 Check the `verify-ports` JSON output. If `"all_match": false`, retry the kill once more. If still occupied after 2 retries, inform the user and stop.
@@ -83,7 +83,7 @@ After starting the background process:
 
 1. **Wait for startup and check that ports are bound** — verify dev ports are now listening:
    ```bash
-   python3 scripts/app_manager.py verify-ports --wait 8 --expect bound [DEV_PORTS]
+   python3 .claude/scripts/app_manager.py verify-ports --wait 8 --expect bound [DEV_PORTS]
    ```
 
 3. **Check Docker containers are healthy** (if applicable):

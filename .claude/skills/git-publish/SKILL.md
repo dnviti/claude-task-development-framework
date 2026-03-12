@@ -16,12 +16,11 @@ The user invoked with: **$ARGUMENTS**
 
 ## Platform Commands
 
-| Operation | GitHub | GitLab |
-|-----------|--------|--------|
-| Create PR/MR | `gh pr create --base B --head H --title T --body B` | `glab mr create --target-branch B --source-branch H --title T --description B` |
-| List PR/MR | `gh pr list --base B --head H --state open --json f --jq 'e'` | `glab mr list --target-branch B --source-branch H --state opened --output json \| jq 'e'` |
-| Merge PR/MR | `gh pr merge URL --auto --merge` | `glab mr merge N --auto-merge --when-pipeline-succeeds` |
-| List issues | `gh issue list --repo "$TRACKER_REPO" --search "term in:title" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
+Use `python3 .claude/scripts/task_manager.py platform-cmd <operation> [key=value ...]` to generate the correct CLI command for the detected platform (GitHub/GitLab).
+
+Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`, `close-issue`, `comment-issue`, `create-issue`, `create-pr`, `list-pr`, `merge-pr`, `create-release`, `edit-release`.
+
+Example: `python3 .claude/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
 ## Instructions
 
@@ -30,13 +29,12 @@ The user invoked with: **$ARGUMENTS**
 Before pushing to the release branch, verify that no `status:to-test` tasks exist that could introduce untested code.
 
 ```bash
-TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
-PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
+python3 .claude/scripts/task_manager.py platform-config
 ```
 
-**If `TRACKER_ENABLED` is `true`:**
+Store the JSON result. Use `enabled`, `repo`, and `cli` fields in subsequent commands.
+
+**If `enabled` is `true`:**
 ```bash
 TOTEST_TASKS=$(gh issue list --repo "$TRACKER_REPO" --label "task,status:to-test" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null)
 # GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:to-test" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"'

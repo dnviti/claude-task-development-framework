@@ -13,45 +13,36 @@ Always respond and work in English. The task block content (field labels, descri
 
 ## Mode Detection
 
-Determine the operating mode first:
+!`python3 .claude/scripts/task_manager.py platform-config`
 
-```bash
-TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
-PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
-```
-
-- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Use platform issues exclusively. No local file operations.
-- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Write local files first, then sync to GitHub.
-- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Use local files only.
+Use the `mode` field to determine behavior: `platform-only`, `dual-sync`, or `local-only`. The JSON includes `platform`, `enabled`, `sync`, `repo`, `cli` (gh/glab), and `labels`.
 
 ## Platform Commands
 
-| Operation | GitHub | GitLab |
-|-----------|--------|--------|
-| List issues (JSON) | `gh issue list --repo "$TRACKER_REPO" --label L --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --output json \| jq 'e'` |
-| Create issue | `gh issue create --repo "$TRACKER_REPO" --title T --body B --label L` | `glab issue create -R "$TRACKER_REPO" --title T --description B -l L` |
-| Search issues | `gh issue list --repo "$TRACKER_REPO" --search "term in:title" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
+Use `python3 .claude/scripts/task_manager.py platform-cmd <operation> [key=value ...]` to generate the correct CLI command for the detected platform (GitHub/GitLab).
+
+Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`, `close-issue`, `comment-issue`, `create-issue`, `create-pr`, `list-pr`, `merge-pr`, `create-release`, `edit-release`.
+
+Example: `python3 .claude/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
 ## Current Task State
 
 ### In Platform-only mode:
 
-#### Highest task IDs (last 20, sorted by number):
-!`CFG=".claude/issues-tracker.json"; [ ! -f "$CFG" ] && CFG=".claude/github-issues.json"; TRACKER_REPO="$(jq -r '.repo' "$CFG" 2>/dev/null)"; gh issue list --repo "$TRACKER_REPO" --label task --state all --limit 500 --json title --jq '.[].title' | grep -oE '[A-Z][A-Z0-9]+-[0-9]{3}' | sort -t'-' -k2 -n | tail -20`
-
-#### All prefixes currently in use:
-!`CFG=".claude/issues-tracker.json"; [ ! -f "$CFG" ] && CFG=".claude/github-issues.json"; TRACKER_REPO="$(jq -r '.repo' "$CFG" 2>/dev/null)"; gh issue list --repo "$TRACKER_REPO" --label task --state all --limit 500 --json title --jq '.[].title' | grep -oE '[A-Z][A-Z0-9]+-[0-9]{3}' | sed 's/-[0-9]*//' | sort -u`
+#### Next available task ID and existing prefixes (from platform):
+In platform-only mode, pipe platform issue titles into the next-id command:
+```bash
+gh issue list --repo "$TRACKER_REPO" --label task --state all --limit 500 --json title --jq '.[].title' | python3 .claude/scripts/task_manager.py next-id --type task --source platform-titles
+```
+This returns the same JSON as local mode: `next_number`, `max_found`, `prefixes`. Crypto false positives (AES-256, etc.) are filtered automatically.
 
 ### In local only and dual sync modes:
 
 #### Next available task ID and existing prefixes:
-!`python3 scripts/task_manager.py next-id --type task`
+!`python3 .claude/scripts/task_manager.py next-id --type task`
 
 #### Section headers in to-do.txt:
-!`python3 scripts/task_manager.py sections --file to-do.txt`
+!`python3 .claude/scripts/task_manager.py sections --file to-do.txt`
 
 ### Section info (Platform-only mode):
 
@@ -86,14 +77,7 @@ Analyze the task description and select an appropriate code prefix.
 
 Task numbering is **globally sequential** across all prefixes.
 
-**In Platform-only mode:**
-1. From the GitHub-sourced "Highest task IDs" data above, extract all numeric parts (e.g., `ORCH-065` -> 65).
-2. **Ignore false positives** like `AES-256` or `SHA-256` — these are not task codes but algorithm references. Only consider IDs where the prefix is a known task prefix or matches the pattern of a short alphabetical prefix.
-3. Find the maximum number.
-4. The new task number = `max + 1`, zero-padded to 3 digits.
-
-**In local only and dual sync modes:**
-Use the `next_number` field from the "Next available task ID" JSON above. The `prefixes` array shows all existing domain prefixes. No manual computation needed — the script handles global sequencing and false-positive filtering.
+**All modes:** Use the `next_number` field from the next-id JSON (from the "Current Task State" section above, or from the `platform-titles` pipe command for platform-only mode). The `prefixes` array shows all existing domain prefixes. The script handles global sequencing and crypto false-positive filtering automatically.
 
 ### Step 4: Explore the Codebase
 
@@ -200,7 +184,7 @@ Before writing, perform a final duplicate check:
 3. If no duplicates found, continue to Step 8.
 
 **In local only and dual sync modes:**
-1. Run: `python3 scripts/task_manager.py duplicates --keywords "keyword1,keyword2,keyword3"`
+1. Run: `python3 .claude/scripts/task_manager.py duplicates --keywords "keyword1,keyword2,keyword3"`
    Use 2-3 key terms from the task title and description as keywords.
 2. If the JSON output contains matches that look like a similar task, warn the user and ask whether to proceed or abort.
 3. If no duplicates found, continue to Step 8.

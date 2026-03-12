@@ -15,30 +15,17 @@ Always respond and work in English. The task block content (field labels, descri
 
 ## Mode Detection
 
-Determine the operating mode first:
+!`python3 .claude/scripts/task_manager.py platform-config`
 
-```bash
-TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
-PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
-```
-
-- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): All operations happen on platform issues. No local file reads or writes. All content in **English**.
-- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Write to local files first, then sync to platform.
-- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Write to local files only.
+Use the `mode` field to determine behavior: `platform-only`, `dual-sync`, or `local-only`. The JSON includes `platform`, `enabled`, `sync`, `repo`, `cli` (gh/glab), and `labels`.
 
 ## Platform Commands
 
-| Operation | GitHub | GitLab |
-|-----------|--------|--------|
-| List issues | `gh issue list --repo "$TRACKER_REPO" --label L --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --output json \| jq 'e'` |
-| Search issues | `gh issue list --repo "$TRACKER_REPO" --search "term in:title" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
-| View issue | `gh issue view N --repo "$TRACKER_REPO" --json title,body,number` | `glab issue view N -R "$TRACKER_REPO" --output json` |
-| Create issue | `gh issue create --repo "$TRACKER_REPO" --title T --body B --label L` | `glab issue create -R "$TRACKER_REPO" --title T --description B -l L` |
-| Close issue | `gh issue close N --repo "$TRACKER_REPO" --comment "msg"` | `glab issue close N -R "$TRACKER_REPO"` then `glab issue note N -R "$TRACKER_REPO" -m "msg"` |
-| Comment on issue | `gh issue comment N --repo "$TRACKER_REPO" --body "msg"` | `glab issue note N -R "$TRACKER_REPO" -m "msg"` |
+Use `python3 .claude/scripts/task_manager.py platform-cmd <operation> [key=value ...]` to generate the correct CLI command for the detected platform (GitHub/GitLab).
+
+Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`, `close-issue`, `comment-issue`, `create-issue`, `create-pr`, `list-pr`, `merge-pr`, `create-release`, `edit-release`.
+
+Example: `python3 .claude/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
 ## Current State
 
@@ -47,19 +34,22 @@ TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
 Ideas available for approval:
 !`CFG=".claude/issues-tracker.json"; [ ! -f "$CFG" ] && CFG=".claude/github-issues.json"; jq -r 'if (.enabled == true) and (.sync != true) then .repo else empty end' "$CFG" 2>/dev/null | xargs -I{} gh issue list --repo {} --label idea --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null`
 
-Highest task IDs from GitHub (last 20):
-!`CFG=".claude/issues-tracker.json"; [ ! -f "$CFG" ] && CFG=".claude/github-issues.json"; jq -r 'if (.enabled == true) and (.sync != true) then .repo else empty end' "$CFG" 2>/dev/null | xargs -I{} gh issue list --repo {} --label task --state all --limit 500 --json title --jq '.[].title' 2>/dev/null | grep -oE '[A-Z][A-Z0-9]+-[0-9]{3}' | sort -t'-' -k2 -n | tail -20`
+Next available task ID (from platform):
+In platform-only mode, pipe platform issue titles into:
+```bash
+gh issue list --repo "$TRACKER_REPO" --label task --state all --limit 500 --json title --jq '.[].title' | python3 .claude/scripts/task_manager.py next-id --type task --source platform-titles
+```
 
 ### Local / dual sync mode queries:
 
 Ideas available for approval:
-!`python3 scripts/task_manager.py list-ideas --file ideas --format summary`
+!`python3 .claude/scripts/task_manager.py list-ideas --file ideas --format summary`
 
 Next available task ID and existing prefixes:
-!`python3 scripts/task_manager.py next-id --type task`
+!`python3 .claude/scripts/task_manager.py next-id --type task`
 
 Section headers in to-do.txt:
-!`python3 scripts/task_manager.py sections --file to-do.txt`
+!`python3 .claude/scripts/task_manager.py sections --file to-do.txt`
 
 ## Arguments
 
@@ -90,7 +80,7 @@ The user wants to approve: **$ARGUMENTS**
 **Local / dual sync mode:**
 Get the full parsed idea data:
 ```bash
-python3 scripts/task_manager.py parse IDEA-NNN
+python3 .claude/scripts/task_manager.py parse IDEA-NNN
 ```
 This returns all fields as JSON: title, category, date, description, motivation.
 
@@ -110,14 +100,7 @@ Analyze the idea's description and category to select an appropriate task prefix
 
 Task numbering is **globally sequential** across all prefixes.
 
-**Platform-only mode:**
-1. From the "Highest task IDs from GitHub" data above, extract all numeric parts.
-2. **Ignore false positives** like `AES-256` or `SHA-256`.
-3. Find the maximum number.
-4. The new task number = `max + 1`, zero-padded to 3 digits.
-
-**Local / dual sync mode:**
-Use the `next_number` field from the "Next available task ID" JSON above. No manual computation needed.
+**All modes:** Use the `next_number` field from the next-id JSON (from the "Current State" section above, or from the `platform-titles` pipe command for platform-only mode). The script handles global sequencing and crypto false-positive filtering automatically.
 
 ### Step 5: Explore the Codebase
 
@@ -216,7 +199,7 @@ gh issue list --repo "$TRACKER_REPO" --label task --state all --search "keyword2
 ```
 
 **Local / dual sync mode:**
-Run: `python3 scripts/task_manager.py duplicates --keywords "keyword1,keyword2,keyword3" --files "to-do.txt,progressing.txt,done.txt"`
+Run: `python3 .claude/scripts/task_manager.py duplicates --keywords "keyword1,keyword2,keyword3" --files "to-do.txt,progressing.txt,done.txt"`
 
 Use 2-3 key terms from the task title and description. If the JSON output contains matches that look like a similar task, warn the user and ask whether to proceed or abort.
 
@@ -236,7 +219,7 @@ Skip local file operations entirely. The task issue creation and idea issue clos
 4. Maintain whitespace conventions: two blank lines between tasks.
 
 **9b. Remove the idea from `ideas.txt`:**
-Run: `python3 scripts/task_manager.py remove IDEA-NNN --file ideas.txt`
+Run: `python3 .claude/scripts/task_manager.py remove IDEA-NNN --file ideas.txt`
 This cleanly removes the idea block and handles whitespace cleanup automatically.
 
 ### Step 9.5: Sync to GitHub Issues

@@ -371,7 +371,7 @@ STOP HERE after calling `AskUserQuestion`. Do NOT proceed until the user respond
 
 6. Run the label setup script:
    ```bash
-   bash scripts/setup-labels.sh
+   python3 .claude/scripts/setup_labels.py
    ```
 
 7. Report the issues tracker setup:

@@ -15,28 +15,17 @@ Always respond and work in English. Idea content MUST remain in **English**.
 
 ## Mode Detection
 
-Determine the operating mode first:
+!`python3 .claude/scripts/task_manager.py platform-config`
 
-```bash
-TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
-PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
-```
-
-- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Read/write ideas from platform issues. No local file operations.
-- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Read/write ideas from local files, then sync to platform issues.
-- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Read/write ideas from local files only.
+Use the `mode` field to determine behavior: `platform-only`, `dual-sync`, or `local-only`. The JSON includes `platform`, `enabled`, `sync`, `repo`, `cli` (gh/glab), and `labels`.
 
 ## Platform Commands
 
-| Operation | GitHub | GitLab |
-|-----------|--------|--------|
-| List issues (JSON) | `gh issue list --repo "$TRACKER_REPO" --label L --state open --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --state opened --output json \| jq 'e'` |
-| View issue | `gh issue view N --repo "$TRACKER_REPO" --json number,title,body` | `glab issue view N -R "$TRACKER_REPO" --output json \| jq '{iid,title,description}'` |
-| Edit issue body | `gh issue edit N --repo "$TRACKER_REPO" --body "B"` | `glab issue update N -R "$TRACKER_REPO" --description "B"` |
-| Comment on issue | `gh issue comment N --repo "$TRACKER_REPO" --body "msg"` | `glab issue note N -R "$TRACKER_REPO" -m "msg"` |
+Use `python3 .claude/scripts/task_manager.py platform-cmd <operation> [key=value ...]` to generate the correct CLI command for the detected platform (GitHub/GitLab).
+
+Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`, `close-issue`, `comment-issue`, `create-issue`, `create-pr`, `list-pr`, `merge-pr`, `create-release`, `edit-release`.
+
+Example: `python3 .claude/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
 ## Current State
 
@@ -60,10 +49,10 @@ gh issue list --repo "$TRACKER_REPO" --label "task,status:todo" --state open --j
 ### Local/Dual mode — data sources:
 
 #### All ideas:
-!`python3 scripts/task_manager.py list-ideas --file ideas --format summary`
+!`python3 .claude/scripts/task_manager.py list-ideas --file ideas --format summary`
 
 #### All tasks (for overlap detection):
-!`python3 scripts/task_manager.py list --status all --format summary`
+!`python3 .claude/scripts/task_manager.py list --status all --format summary`
 
 ## Arguments
 

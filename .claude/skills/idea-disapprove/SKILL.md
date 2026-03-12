@@ -13,28 +13,17 @@ Always respond and work in English.
 
 ## Mode Detection
 
-Determine the operating mode first:
+!`python3 .claude/scripts/task_manager.py platform-config`
 
-```bash
-TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
-PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
-```
-
-- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Close the GitHub/GitLab Issue with rejection reason. No local file operations.
-- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Move idea in local files, then close GitHub/GitLab Issue.
-- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Move idea from `ideas.txt` to `idea-disapproved.txt`.
+Use the `mode` field to determine behavior: `platform-only`, `dual-sync`, or `local-only`. The JSON includes `platform`, `enabled`, `sync`, `repo`, `cli` (gh/glab), and `labels`.
 
 ## Platform Commands
 
-| Operation | GitHub | GitLab |
-|-----------|--------|--------|
-| List issues | `gh issue list --repo "$TRACKER_REPO" --label L --state open --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --state opened --output json \| jq 'e'` |
-| Search issues | `gh issue list --repo "$TRACKER_REPO" --search "term in:title" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
-| View issue | `gh issue view N --repo "$TRACKER_REPO" --json title,body` | `glab issue view N -R "$TRACKER_REPO" --output json \| jq '{title,description}'` |
-| Close issue | `gh issue close N --repo "$TRACKER_REPO" --reason "not planned" --comment "msg"` | `glab issue close N -R "$TRACKER_REPO"` then `glab issue note N -R "$TRACKER_REPO" -m "msg"` |
+Use `python3 .claude/scripts/task_manager.py platform-cmd <operation> [key=value ...]` to generate the correct CLI command for the detected platform (GitHub/GitLab).
+
+Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`, `close-issue`, `comment-issue`, `create-issue`, `create-pr`, `list-pr`, `merge-pr`, `create-release`, `edit-release`.
+
+Example: `python3 .claude/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
 ## Current State
 
@@ -46,10 +35,10 @@ gh issue list --repo "$TRACKER_REPO" --label "idea" --state open --json number,t
 ```
 
 ### Local/Dual mode — ideas available for disapproval:
-!`python3 scripts/task_manager.py list-ideas --file ideas --format summary`
+!`python3 .claude/scripts/task_manager.py list-ideas --file ideas --format summary`
 
 ### Local/Dual mode — already disapproved ideas:
-!`python3 scripts/task_manager.py list-ideas --file disapproved --format summary`
+!`python3 .claude/scripts/task_manager.py list-ideas --file disapproved --format summary`
 
 ## Arguments
 
@@ -77,7 +66,7 @@ If no ideas are available, inform the user: "No ideas available for disapproval.
 **In local/dual mode:**
 Get the full parsed idea data:
 ```bash
-python3 scripts/task_manager.py parse IDEA-NNN
+python3 .claude/scripts/task_manager.py parse IDEA-NNN
 ```
 Present the idea fields (title, category, description, motivation) to the user so they can review what they are disapproving.
 
@@ -130,7 +119,7 @@ gh issue close "$IDEA_ISSUE" --repo "$TRACKER_REPO" --reason "not planned" --com
 3. **Append the modified block to `idea-disapproved.txt`:**
    Use `Edit` to append the block (with `REJECTION REASON:` added) at the end of `idea-disapproved.txt`.
 4. **Remove the idea from `ideas.txt`:**
-   Run: `python3 scripts/task_manager.py remove IDEA-NNN --file ideas.txt`
+   Run: `python3 .claude/scripts/task_manager.py remove IDEA-NNN --file ideas.txt`
    This cleanly removes the block and handles whitespace cleanup automatically.
 5. **Close the GitHub/GitLab Issue** (same as Platform-only mode above). If the command fails, warn but do NOT fail — the local operations are already complete.
 

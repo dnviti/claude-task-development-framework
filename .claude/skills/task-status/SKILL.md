@@ -10,26 +10,17 @@ You are a task status reporter. Analyze the data below and present a clear, well
 
 ## Mode Detection
 
-Determine the operating mode first:
+!`python3 .claude/scripts/task_manager.py platform-config`
 
-```bash
-TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
-PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
-```
-
-- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Use platform issues as the sole data source. Skip all local file reads.
-- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Use local files as primary, platform as secondary.
-- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Use local files only.
+Use the `mode` field to determine behavior: `platform-only`, `dual-sync`, or `local-only`. The JSON includes `platform`, `enabled`, `sync`, `repo`, `cli` (gh/glab), and `labels`.
 
 ## Platform Commands
 
-| Operation | GitHub | GitLab |
-|-----------|--------|--------|
-| List issues (JSON) | `gh issue list --repo "$TRACKER_REPO" --label L --state open --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --state opened --output json \| jq 'e'` |
-| List issues (state) | `--state open` / `--state closed` | `--state opened` / `--state closed` |
+Use `python3 .claude/scripts/task_manager.py platform-cmd <operation> [key=value ...]` to generate the correct CLI command for the detected platform (GitHub/GitLab).
+
+Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`, `close-issue`, `comment-issue`, `create-issue`, `create-pr`, `list-pr`, `merge-pr`, `create-release`, `edit-release`.
+
+Example: `python3 .claude/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
 ---
 
@@ -101,19 +92,19 @@ Present the report following the same format as below (Instructions section).
 These sections are used in local-only or dual-sync mode:
 
 ### Summary (JSON):
-!`python3 scripts/task_manager.py summary`
+!`python3 .claude/scripts/task_manager.py summary`
 
 ### In-Progress Tasks:
-!`python3 scripts/task_manager.py list --status progressing --format summary`
+!`python3 .claude/scripts/task_manager.py list --status progressing --format summary`
 
 ### Completed Tasks:
-!`python3 scripts/task_manager.py list --status done --format summary`
+!`python3 .claude/scripts/task_manager.py list --status done --format summary`
 
 ### Blocked Tasks:
-!`python3 scripts/task_manager.py list --status blocked --format summary`
+!`python3 .claude/scripts/task_manager.py list --status blocked --format summary`
 
 ### Pending Tasks:
-!`python3 scripts/task_manager.py list --status todo --format summary`
+!`python3 .claude/scripts/task_manager.py list --status todo --format summary`
 
 ### Recommended Implementation Order:
 !`sed -n '/RECOMMENDED IMPLEMENTATION ORDER/,/^====/p' to-do.txt | tr -d '\r'`

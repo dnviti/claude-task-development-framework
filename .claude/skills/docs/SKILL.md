@@ -12,7 +12,7 @@ You are a documentation manager for this project. Your job is to create, update,
 ## Current Documentation State
 
 ### Existing docs/ files:
-!`python3 scripts/task_manager.py find-files --patterns "*.md" --max-depth 2 --limit 20`
+!`python3 .claude/scripts/task_manager.py find-files --patterns "*.md" --max-depth 2 --limit 20`
 
 ### README.md:
 !`python3 -c "from pathlib import Path; p=Path('README.md'); print(f'Exists ({len(p.read_text().splitlines())} lines)') if p.exists() else print('Missing')"`
@@ -21,10 +21,10 @@ You are a documentation manager for this project. Your job is to create, update,
 !`git diff --name-only HEAD~5..HEAD 2>&1 || echo "(no recent commits)"`
 
 ### In-progress tasks:
-!`python3 scripts/task_manager.py list --status progressing --format summary`
+!`python3 .claude/scripts/task_manager.py list --status progressing --format summary`
 
 ### Recently completed tasks:
-!`python3 scripts/task_manager.py list --status done --format summary`
+!`python3 .claude/scripts/task_manager.py list --status done --format summary`
 
 ## Arguments
 

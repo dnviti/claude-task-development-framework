@@ -247,7 +247,7 @@ The framework supports an optional GitHub Issues integration that can operate in
 
 3. Create the required labels on your GitHub repo:
    ```bash
-   bash scripts/setup-github-labels.sh
+   python3 .claude/scripts/setup_labels.py
    ```
 
 4. Ensure `gh` CLI is authenticated: `gh auth status`
@@ -262,8 +262,8 @@ The framework includes two Python scripts (zero external dependencies, stdlib on
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/task_manager.py` | Task/idea file parsing, ID generation, duplicate checking, block movement, file-to-task correlation (used by the post-edit hook) |
-| `scripts/app_manager.py` | Cross-platform port checking, process management for dev server lifecycle |
+| `.claude/scripts/task_manager.py` | Task/idea file parsing, ID generation, duplicate checking, block movement, file-to-task correlation (used by the post-edit hook) |
+| `.claude/scripts/app_manager.py` | Cross-platform port checking, process management for dev server lifecycle |
 
 The post-edit hook in `.claude/settings.json` automatically runs `task_manager.py` whenever a file is edited, surfacing related in-progress tasks and a progress summary.
 
@@ -301,8 +301,8 @@ Then invoke it with `/my-skill` in Claude Code.
 ## Cross-Platform Notes
 
 - **Python command:** All scripts and skills reference `python3`. On Windows where only `python` is available, substitute `python` for `python3` in all commands and update the reference in `.claude/settings.json`.
-- **Port management:** `scripts/app_manager.py` automatically uses the correct OS tools — `lsof`/`ss` on Unix, `netstat`/`taskkill` on Windows.
-- **File search:** `scripts/task_manager.py find-files` provides cross-platform file discovery.
+- **Port management:** `.claude/scripts/app_manager.py` automatically uses the correct OS tools — `lsof`/`ss` on Unix, `netstat`/`taskkill` on Windows.
+- **File search:** `.claude/scripts/task_manager.py find-files` provides cross-platform file discovery.
 
 ## Project Structure
 
@@ -315,13 +315,14 @@ claude-task-development-framework/
 ├── done.txt                     # Completed tasks [x]
 ├── ideas.txt                    # Ideas awaiting evaluation
 ├── idea-disapproved.txt         # Rejected ideas archive
-├── scripts/
-│   ├── task_manager.py          # Task/idea management CLI and post-edit hook
-│   ├── app_manager.py           # Cross-platform port and process management
-│   └── setup-github-labels.sh   # Create GitHub labels for Issues integration
 └── .claude/
     ├── settings.json            # Hook configuration
     ├── github-issues.example.json # GitHub Issues integration config template
+    ├── scripts/                 # Python automation scripts (stdlib only)
+    │   ├── task_manager.py      # Task/idea management CLI and post-edit hook
+    │   ├── release_manager.py   # Release automation CLI (version, changelog)
+    │   ├── app_manager.py       # Cross-platform port and process management
+    │   └── setup_labels.py      # Create platform labels for Issues integration
     └── skills/                  # 20 Claude Code skills
         ├── task-create/         # Create tasks
         ├── task-pick/           # Pick up and close tasks

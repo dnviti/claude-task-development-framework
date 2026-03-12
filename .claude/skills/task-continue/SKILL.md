@@ -13,26 +13,17 @@ This skill does NOT close or commit tasks — use `/task-pick` for that.
 
 ## Mode Detection
 
-Determine the operating mode first:
+!`python3 .claude/scripts/task_manager.py platform-config`
 
-```bash
-TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
-PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
-```
-
-- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Read task data from GitHub Issues. No local file operations.
-- **Dual sync / Local only mode**: Read task data from local files (`progressing.txt`).
+Use the `mode` field to determine behavior: `platform-only`, `dual-sync`, or `local-only`. The JSON includes `platform`, `enabled`, `sync`, `repo`, `cli` (gh/glab), and `labels`.
 
 ## Platform Commands
 
-| Operation | GitHub | GitLab |
-|-----------|--------|--------|
-| List issues (JSON) | `gh issue list --repo "$TRACKER_REPO" --label L --state open --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --state opened --output json \| jq 'e'` |
-| Search issues | `gh issue list --repo "$TRACKER_REPO" --search "term in:title" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
-| View issue | `gh issue view N --repo "$TRACKER_REPO" --json body --jq '.body'` | `glab issue view N -R "$TRACKER_REPO" --output json \| jq '.body'` |
+Use `python3 .claude/scripts/task_manager.py platform-cmd <operation> [key=value ...]` to generate the correct CLI command for the detected platform (GitHub/GitLab).
+
+Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`, `close-issue`, `comment-issue`, `create-issue`, `create-pr`, `list-pr`, `merge-pr`, `create-release`, `edit-release`.
+
+Example: `python3 .claude/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
 ---
 
@@ -46,7 +37,7 @@ gh issue list --repo "$TRACKER_REPO" --label "task,status:in-progress" --state o
 ```
 
 ### Local/Dual mode — In-progress tasks:
-!`python3 scripts/task_manager.py list --status progressing --format summary`
+!`python3 .claude/scripts/task_manager.py list --status progressing --format summary`
 
 ## Instructions
 
@@ -97,8 +88,8 @@ git branch --list "task/<task-code-lowercase>"
 **In local/dual mode:**
 - Get the full parsed task data and file existence report:
 ```bash
-python3 scripts/task_manager.py parse TASK-CODE
-python3 scripts/task_manager.py verify-files TASK-CODE
+python3 .claude/scripts/task_manager.py parse TASK-CODE
+python3 .claude/scripts/task_manager.py verify-files TASK-CODE
 ```
 - The `parse` command returns all task fields as structured JSON: description, technical_details, files_create, files_modify, priority, dependencies.
 - The `verify-files` command returns a JSON report showing which files exist (`"exists": true/false`) and an `all_exist` summary.

@@ -81,15 +81,15 @@ Tasks and ideas support three operating modes, controlled by `.claude/issues-tra
 
 The `platform` field (`"github"` or `"gitlab"`) determines which CLI tool (`gh` or `glab`) is used. If omitted, defaults to `"github"`.
 
-**Setup:** Copy `.claude/issues-tracker.example.json` to `.claude/issues-tracker.json`, set the `platform` and `repo` fields, and run `bash scripts/setup-labels.sh` to create the required labels. Or use `/project-initialization` which offers this setup interactively. Legacy `.claude/github-issues.json` is still supported as a fallback.
+**Setup:** Copy `.claude/issues-tracker.example.json` to `.claude/issues-tracker.json`, set the `platform` and `repo` fields, and run `python3 .claude/scripts/setup_labels.py` to create the required labels. Or use `/project-initialization` which offers this setup interactively. Legacy `.claude/github-issues.json` is still supported as a fallback.
 
 ## Cross-Platform Notes
 
 This framework supports **Windows, macOS, and Linux** with automatic OS detection.
 
 - **Python command:** All scripts and skills reference `python3`. On Windows where only `python` is available, substitute `python` for `python3` in all commands. Windows users should also update the `python3` reference in `.claude/settings.json` to `python`.
-- **Port management:** `scripts/app_manager.py` automatically uses the correct OS tools — `lsof`/`ss` on Unix, `netstat`/`taskkill` on Windows.
-- **File search:** `scripts/task_manager.py find-files` provides cross-platform file discovery (replaces Unix `find`).
+- **Port management:** `.claude/scripts/app_manager.py` automatically uses the correct OS tools — `lsof`/`ss` on Unix, `netstat`/`taskkill` on Windows.
+- **File search:** `.claude/scripts/task_manager.py find-files` provides cross-platform file discovery (replaces Unix `find`).
 
 ### File Naming Conventions
 

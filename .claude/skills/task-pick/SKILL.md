@@ -11,31 +11,17 @@ You are a task manager for this project. Your job is to pick up the next todo ta
 
 ## Mode Detection
 
-Determine the operating mode first:
+!`python3 .claude/scripts/task_manager.py platform-config`
 
-```bash
-TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
-PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
-```
-
-- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Read/write task state via GitHub Issues. No local file operations.
-- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Use local files as primary, then sync to GitHub.
-- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Use local files only.
+Use the `mode` field to determine behavior: `platform-only`, `dual-sync`, or `local-only`. The JSON includes `platform`, `enabled`, `sync`, `repo`, `cli` (gh/glab), and `labels`.
 
 ## Platform Commands
 
-| Operation | GitHub | GitLab |
-|-----------|--------|--------|
-| List issues | `gh issue list --repo "$TRACKER_REPO" --label L --state open --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --state opened --output json \| jq 'e'` |
-| Search issues | `gh issue list --repo "$TRACKER_REPO" --search "term in:title" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
-| View issue | `gh issue view N --repo "$TRACKER_REPO" --json body --jq '.body'` | `glab issue view N -R "$TRACKER_REPO" --output json \| jq '.description'` |
-| Edit labels | `gh issue edit N --repo "$TRACKER_REPO" --add-label L --remove-label L` | `glab issue update N -R "$TRACKER_REPO" --label L --unlabel L` |
-| Close issue | `gh issue close N --repo "$TRACKER_REPO" --comment "msg"` | `glab issue close N -R "$TRACKER_REPO"` then `glab issue note N -R "$TRACKER_REPO" -m "msg"` |
-| Comment | `gh issue comment N --repo "$TRACKER_REPO" --body "msg"` | `glab issue note N -R "$TRACKER_REPO" -m "msg"` |
-| Create PR/MR | `gh pr create --base B --head H --title T --body B` | `glab mr create --target-branch B --source-branch H --title T --description B` |
+Use `python3 .claude/scripts/task_manager.py platform-cmd <operation> [key=value ...]` to generate the correct CLI command for the detected platform (GitHub/GitLab).
+
+Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`, `close-issue`, `comment-issue`, `create-issue`, `create-pr`, `list-pr`, `merge-pr`, `create-release`, `edit-release`.
+
+Example: `python3 .claude/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
 ## Current Task State
 
@@ -57,13 +43,13 @@ gh issue list --repo "$TRACKER_REPO" --label "task,status:done" --state closed -
 ### Local/Dual mode:
 
 #### Pending tasks:
-!`python3 scripts/task_manager.py list --status todo --format summary`
+!`python3 .claude/scripts/task_manager.py list --status todo --format summary`
 
 #### Completed tasks:
-!`python3 scripts/task_manager.py list --status done --format summary`
+!`python3 .claude/scripts/task_manager.py list --status done --format summary`
 
 #### Recommended implementation order:
-!`python3 scripts/task_manager.py sections --file to-do.txt`
+!`python3 .claude/scripts/task_manager.py sections --file to-do.txt`
 
 ## Instructions
 
@@ -103,7 +89,7 @@ gh issue comment "$ISSUE_NUM" --repo "$TRACKER_REPO" --body "Task picked up. Bra
 
 1. Run the move command:
    ```bash
-   python3 scripts/task_manager.py move TASK-CODE --to progressing
+   python3 .claude/scripts/task_manager.py move TASK-CODE --to progressing
    ```
    This automatically removes the block from `to-do.txt`, inserts it into `progressing.txt`, and updates the status symbol from `[ ]` to `[~]`. Verify the JSON output shows `"success": true`.
 2. If the task appears in the recommended order section of `to-do.txt`, update its status annotation to `[IN PROGRESS]`.
@@ -147,7 +133,7 @@ git branch --list "task/<task-code-lowercase>"
 
 Get the full parsed task data:
 ```bash
-python3 scripts/task_manager.py parse TASK-CODE
+python3 .claude/scripts/task_manager.py parse TASK-CODE
 ```
 This returns all fields as structured JSON: priority, dependencies, description, technical_details, files_create, files_modify.
 
@@ -275,7 +261,7 @@ gh issue close "$ISSUE_NUM" --repo "$TRACKER_REPO" --comment "Task completed. Qu
 **In dual sync mode:**
 1. Run the move command with a completion summary:
    ```bash
-   python3 scripts/task_manager.py move TASK-CODE --to done --completed-summary "Brief summary of what was implemented"
+   python3 .claude/scripts/task_manager.py move TASK-CODE --to done --completed-summary "Brief summary of what was implemented"
    ```
    This automatically removes from `progressing.txt`, inserts into `done.txt`, updates `[~]` to `[x]`, and adds the `COMPLETED:` line.
 2. If the task appears in the recommended order section of `to-do.txt`, update its status annotation to `[COMPLETED]`.

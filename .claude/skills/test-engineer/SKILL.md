@@ -27,16 +27,16 @@ The user invoked with: **$ARGUMENTS**
 ## Existing Test Infrastructure
 
 ### Test config files:
-!`python3 scripts/task_manager.py find-files --patterns "vitest.config.*,jest.config.*,pytest.ini,pyproject.toml,.mocharc.*" --max-depth 3 --limit 20`
+!`python3 .claude/scripts/task_manager.py find-files --patterns "vitest.config.*,jest.config.*,pytest.ini,pyproject.toml,.mocharc.*" --max-depth 3 --limit 20`
 
 ### Existing test files:
-!`python3 scripts/task_manager.py find-files --patterns "*.test.*,*.spec.*,test_*" --max-depth 5 --limit 30`
+!`python3 .claude/scripts/task_manager.py find-files --patterns "*.test.*,*.spec.*,test_*" --max-depth 5 --limit 30`
 
 ### Test scripts in package.json (if applicable):
 !`python3 -c "import json, sys; d=json.load(open('package.json')); [print(f'  {k}: {v}') for k,v in d.get('scripts',{}).items() if 'test' in k]" 2>/dev/null || echo "(no package.json or no test scripts)"`
 
 ### GitHub Actions workflows:
-!`python3 scripts/task_manager.py find-files --patterns "*.yml,*.yaml" --max-depth 3 --limit 10`
+!`python3 .claude/scripts/task_manager.py find-files --patterns "*.yml,*.yaml" --max-depth 3 --limit 10`
 
 ## Your Core Responsibilities
 
@@ -164,15 +164,9 @@ When invoked to test a specific task (e.g., `/test-engineer TASK-CODE` or `/test
 
 ### Step T1: Mode Detection
 
-Determine the operating mode first:
+!`python3 .claude/scripts/task_manager.py platform-config`
 
-```bash
-TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
-PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
-```
+Use the `mode` field to determine behavior: `platform-only`, `dual-sync`, or `local-only`. The JSON includes `platform`, `enabled`, `sync`, `repo`, `cli` (gh/glab), and `labels`.
 
 ### Step T2: Find to-test tasks
 
@@ -188,7 +182,7 @@ gh issue list --repo "$TRACKER_REPO" --label "task,status:to-test" --state open 
 
 **In local/dual mode:**
 ```bash
-python3 scripts/task_manager.py list --status progressing --format summary
+python3 .claude/scripts/task_manager.py list --status progressing --format summary
 ```
 
 If multiple tasks are found, use `AskUserQuestion` to ask the user which task they want to test.
@@ -207,8 +201,8 @@ gh issue view $ISSUE_NUM --repo "$TRACKER_REPO" --json body --jq '.body'
 
 **In local/dual mode:**
 ```bash
-python3 scripts/task_manager.py parse TASK-CODE
-python3 scripts/task_manager.py verify-files TASK-CODE
+python3 .claude/scripts/task_manager.py parse TASK-CODE
+python3 .claude/scripts/task_manager.py verify-files TASK-CODE
 ```
 
 Extract the DESCRIPTION, TECHNICAL DETAILS, and Files involved sections. These will inform both the automated test scope and the manual testing guide.

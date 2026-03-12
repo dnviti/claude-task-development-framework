@@ -11,7 +11,7 @@ You are a DevOps operator for this project. Your job is to cleanly stop the deve
 ## Current Environment State
 
 ### Dev port status (JSON — check DEV_PORTS in CLAUDE.md):
-!`python3 scripts/app_manager.py check-ports 3000 8080`
+!`python3 .claude/scripts/app_manager.py check-ports 3000 8080`
 
 ### Docker containers:
 !`docker ps --format "{{.Names}}: {{.Status}}"`
@@ -36,7 +36,7 @@ Examine the environment state above. The app is considered "running" if **any** 
 ### Step 2: Kill dev server processes
 
 ```bash
-python3 scripts/app_manager.py kill-ports [DEV_PORTS]
+python3 .claude/scripts/app_manager.py kill-ports [DEV_PORTS]
 ```
 
 ### Step 3: Verify processes are stopped
@@ -44,7 +44,7 @@ python3 scripts/app_manager.py kill-ports [DEV_PORTS]
 Wait briefly, then confirm ports are free:
 
 ```bash
-python3 scripts/app_manager.py verify-ports --wait 2 --expect free [DEV_PORTS]
+python3 .claude/scripts/app_manager.py verify-ports --wait 2 --expect free [DEV_PORTS]
 ```
 
 Check the JSON output. If `"all_match": false`, retry the kill one more time. If still occupied after retry, inform the user that manual intervention may be needed and show the PIDs from the JSON output.

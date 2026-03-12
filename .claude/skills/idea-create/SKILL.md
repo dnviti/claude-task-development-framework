@@ -15,44 +15,34 @@ Always respond and work in English. The idea block content (field labels, descri
 
 ## Mode Detection
 
-Determine the operating mode first:
+!`python3 .claude/scripts/task_manager.py platform-config`
 
-```bash
-TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
-PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
-```
-
-- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Create ideas as platform issues only. No local file operations.
-- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Write to `ideas.txt` first, then sync to platform issues.
-- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Write to `ideas.txt` only.
+Use the `mode` field to determine behavior: `platform-only`, `dual-sync`, or `local-only`. The JSON includes `platform`, `enabled`, `sync`, `repo`, `cli` (gh/glab), and `labels`.
 
 ## Platform Commands
 
-| Operation | GitHub | GitLab |
-|-----------|--------|--------|
-| List issues (JSON) | `gh issue list --repo "$TRACKER_REPO" --label L --state all --json title --jq '...'` | `glab issue list -R "$TRACKER_REPO" -l L --state all --output json \| jq '...'` |
-| Create issue | `gh issue create --repo "$TRACKER_REPO" --title T --body B --label L` | `glab issue create -R "$TRACKER_REPO" --title T --description B -l L` |
-| Search issues | `gh issue list --repo "$TRACKER_REPO" --search "term" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
+Use `python3 .claude/scripts/task_manager.py platform-cmd <operation> [key=value ...]` to generate the correct CLI command for the detected platform (GitHub/GitLab).
+
+Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`, `close-issue`, `comment-issue`, `create-issue`, `create-pr`, `list-pr`, `merge-pr`, `create-release`, `edit-release`.
+
+Example: `python3 .claude/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
 ## Current Idea State
 
-### Platform-only mode — existing idea IDs:
+### Platform-only mode — next idea ID:
 
+In platform-only mode, pipe platform issue titles into:
 ```bash
-gh issue list --repo "$TRACKER_REPO" --label idea --state all --limit 500 --json title --jq '.[].title' 2>/dev/null | grep -oE 'IDEA-[0-9]{3}' | sort -t'-' -k2 -n | tail -10
-# GitLab: glab issue list -R "$TRACKER_REPO" -l idea --state all --output json | jq '.[].title' | grep -oE 'IDEA-[0-9]{3}' | sort -t'-' -k2 -n | tail -10
+gh issue list --repo "$TRACKER_REPO" --label idea --state all --limit 500 --json title --jq '.[].title' | python3 .claude/scripts/task_manager.py next-id --type idea --source platform-titles
 ```
 
 ### Local/Dual mode:
 
 #### Next available idea ID:
-!`python3 scripts/task_manager.py next-id --type idea`
+!`python3 .claude/scripts/task_manager.py next-id --type idea`
 
 #### Current ideas:
-!`python3 scripts/task_manager.py list-ideas --file ideas --format summary`
+!`python3 .claude/scripts/task_manager.py list-ideas --file ideas --format summary`
 
 ## Arguments
 
@@ -169,7 +159,7 @@ gh issue list --repo "$TRACKER_REPO" --search "keyword2" --label task --json num
 ```
 
 **In local/dual mode:**
-1. Run: `python3 scripts/task_manager.py duplicates --keywords "keyword1,keyword2,keyword3"`
+1. Run: `python3 .claude/scripts/task_manager.py duplicates --keywords "keyword1,keyword2,keyword3"`
    Use 2-3 key terms from the idea title and description as keywords.
 2. If the JSON output contains matches that look like a similar idea or task, warn the user and ask whether to proceed or abort.
 3. If no duplicates found, continue to Step 7.

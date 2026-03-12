@@ -361,14 +361,74 @@ def find_section_range(filepath: Path, section_letter: str) -> tuple[int, int] |
     return (content_start, next_section_line)
 
 
+# ── Subcommand: platform-config ────────────────────────────────────────────
+
+def cmd_platform_config(args):
+    """Return platform tracker configuration as JSON."""
+    root = find_project_root()
+
+    config_file = None
+    data = {}
+    for candidate in ["issues-tracker.json", "github-issues.json"]:
+        fp = root / ".claude" / candidate
+        if fp.exists():
+            config_file = str(Path(".claude") / candidate)
+            with open(fp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            break
+
+    enabled = data.get("enabled", False)
+    sync = data.get("sync", False)
+    platform = data.get("platform", "github")
+
+    if enabled and not sync:
+        mode = "platform-only"
+    elif enabled and sync:
+        mode = "dual-sync"
+    else:
+        mode = "local-only"
+
+    result = {
+        "platform": platform,
+        "enabled": enabled,
+        "sync": sync,
+        "repo": data.get("repo"),
+        "mode": mode,
+        "config_file": config_file,
+        "cli": "glab" if platform == "gitlab" else "gh",
+        "labels": data.get("labels"),
+    }
+    print(json.dumps(result, indent=2))
+
+
 # ── Subcommand: next-id ─────────────────────────────────────────────────────
+
+def _next_id_from_stdin(code_re, filter_crypto=True):
+    """Parse task/idea codes from stdin lines, return (max_num, prefixes)."""
+    max_num = 0
+    prefixes = set()
+    for line in sys.stdin:
+        for m in code_re.finditer(line):
+            full_match = m.group(0)
+            num = int(m.group(1))
+            prefix = full_match.rsplit("-", 1)[0]
+            if filter_crypto and prefix in CRYPTO_PREFIXES:
+                continue
+            if num > max_num:
+                max_num = num
+            prefixes.add(prefix)
+    return max_num, prefixes
+
 
 def cmd_next_id(args):
     root = find_project_root()
     max_num = 0
     prefixes = set()
 
-    if args.type == "task":
+    if args.source == "platform-titles":
+        code_re = TASK_CODE_RE if args.type == "task" else IDEA_CODE_RE
+        max_num, prefixes = _next_id_from_stdin(code_re, filter_crypto=True)
+    elif args.type == "task":
         files = [root / f for f in TASK_FILES]
         for fp in files:
             if not fp.exists():
@@ -944,6 +1004,251 @@ def cmd_find_files(args):
                 print(r)
 
 
+# ── Subcommand: platform-cmd ───────────────────────────────────────────────
+
+def _load_platform_config():
+    """Load platform config (reuses platform-config logic)."""
+    root = find_project_root()
+    for candidate in ["issues-tracker.json", "github-issues.json"]:
+        fp = root / ".claude" / candidate
+        if fp.exists():
+            with open(fp, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            platform = data.get("platform", "github")
+            return {
+                "platform": platform,
+                "repo": data.get("repo", ""),
+                "cli": "glab" if platform == "gitlab" else "gh",
+                "labels": data.get("labels", {}),
+            }
+    return {"platform": "github", "repo": "", "cli": "gh", "labels": {}}
+
+
+def _shlex_quote(s: str) -> str:
+    """Quote a string for shell use (cross-platform safe)."""
+    if not s:
+        return "''"
+    # Simple quoting: if no special chars, return as-is
+    import shlex
+    return shlex.quote(s)
+
+
+def cmd_platform_cmd(args):
+    """Generate the correct platform CLI command string."""
+    cfg = _load_platform_config()
+    cli = cfg["cli"]
+    repo = cfg["repo"]
+    op = args.operation
+
+    # Collect all extra key=value args into a dict
+    params = {}
+    if args.params:
+        for p in args.params:
+            if "=" in p:
+                k, v = p.split("=", 1)
+                params[k] = v
+
+    cmd = None
+
+    if cli == "gh":
+        if op == "list-issues":
+            cmd = f'gh issue list --repo "{repo}"'
+            if params.get("labels"):
+                cmd += f' --label "{params["labels"]}"'
+            cmd += f' --state {params.get("state", "open")}'
+            cmd += f' --json {params.get("json", "number,title")}'
+            if params.get("jq"):
+                cmd += f" --jq '{params['jq']}'"
+        elif op == "search-issues":
+            cmd = f'gh issue list --repo "{repo}"'
+            cmd += f' --search "{params.get("search", "")}"'
+            if params.get("labels"):
+                cmd += f' --label "{params["labels"]}"'
+            cmd += f' --state {params.get("state", "open")}'
+            cmd += f' --json {params.get("json", "number,title")}'
+        elif op == "view-issue":
+            cmd = f'gh issue view {params.get("number", "N")} --repo "{repo}"'
+            cmd += f' --json {params.get("json", "body")} --jq \'{params.get("jq", ".body")}\''
+        elif op == "edit-issue":
+            cmd = f'gh issue edit {params.get("number", "N")} --repo "{repo}"'
+            if params.get("add-labels"):
+                cmd += f' --add-label "{params["add-labels"]}"'
+            if params.get("remove-labels"):
+                cmd += f' --remove-label "{params["remove-labels"]}"'
+        elif op == "close-issue":
+            cmd = f'gh issue close {params.get("number", "N")} --repo "{repo}"'
+            if params.get("comment"):
+                cmd += f' --comment "{params["comment"]}"'
+        elif op == "comment-issue":
+            cmd = f'gh issue comment {params.get("number", "N")} --repo "{repo}"'
+            cmd += f' --body "{params.get("body", "")}"'
+        elif op == "create-issue":
+            cmd = f'gh issue create --repo "{repo}"'
+            cmd += f' --title "{params.get("title", "")}"'
+            cmd += f' --body "{params.get("body", "")}"'
+            if params.get("labels"):
+                cmd += f' --label "{params["labels"]}"'
+        elif op == "create-pr":
+            cmd = f'gh pr create'
+            cmd += f' --base {params.get("base", "main")}'
+            cmd += f' --head {params.get("head", "")}'
+            cmd += f' --title "{params.get("title", "")}"'
+            cmd += f' --body "{params.get("body", "")}"'
+        elif op == "list-pr":
+            cmd = f'gh pr list'
+            cmd += f' --base {params.get("base", "main")}'
+            cmd += f' --head {params.get("head", "")}'
+            cmd += f' --state {params.get("state", "open")}'
+            cmd += f' --json {params.get("json", "number,url")}'
+            if params.get("jq"):
+                cmd += f" --jq '{params['jq']}'"
+        elif op == "merge-pr":
+            cmd = f'gh pr merge {params.get("url", "")} --auto --merge'
+        elif op == "create-release":
+            cmd = f'gh release create "{params.get("tag", "")}" --repo "{repo}"'
+            cmd += f' --title "{params.get("title", "")}"'
+            cmd += f' --notes "{params.get("notes", "")}"'
+            if params.get("prerelease") == "true":
+                cmd += " --prerelease"
+        elif op == "edit-release":
+            cmd = f'gh release edit "{params.get("tag", "")}" --repo "{repo}"'
+            cmd += f' --notes "{params.get("notes", "")}"'
+        else:
+            print(json.dumps({"error": f"Unknown operation: {op}"}))
+            sys.exit(1)
+
+    elif cli == "glab":
+        if op == "list-issues":
+            cmd = f'glab issue list -R "{repo}"'
+            if params.get("labels"):
+                cmd += f' -l "{params["labels"]}"'
+            state = params.get("state", "open")
+            cmd += f' --state {"opened" if state == "open" else state}'
+            cmd += f' --output json'
+            if params.get("jq"):
+                cmd += f" | jq '{params['jq']}'"
+        elif op == "search-issues":
+            cmd = f'glab issue list -R "{repo}"'
+            cmd += f' --search "{params.get("search", "")}"'
+            if params.get("labels"):
+                cmd += f' -l "{params["labels"]}"'
+            cmd += ' --output json'
+        elif op == "view-issue":
+            cmd = f'glab issue view {params.get("number", "N")} -R "{repo}"'
+            cmd += f' --output json | jq \'{params.get("jq", ".description")}\''
+        elif op == "edit-issue":
+            cmd = f'glab issue update {params.get("number", "N")} -R "{repo}"'
+            if params.get("add-labels"):
+                cmd += f' --label "{params["add-labels"]}"'
+            if params.get("remove-labels"):
+                cmd += f' --unlabel "{params["remove-labels"]}"'
+        elif op == "close-issue":
+            cmd = f'glab issue close {params.get("number", "N")} -R "{repo}"'
+            if params.get("comment"):
+                cmd += f'\nglab issue note {params.get("number", "N")} -R "{repo}" -m "{params["comment"]}"'
+        elif op == "comment-issue":
+            cmd = f'glab issue note {params.get("number", "N")} -R "{repo}"'
+            cmd += f' -m "{params.get("body", "")}"'
+        elif op == "create-issue":
+            cmd = f'glab issue create -R "{repo}"'
+            cmd += f' --title "{params.get("title", "")}"'
+            cmd += f' --description "{params.get("body", "")}"'
+            if params.get("labels"):
+                cmd += f' -l "{params["labels"]}"'
+        elif op == "create-pr":
+            cmd = f'glab mr create'
+            cmd += f' --target-branch {params.get("base", "main")}'
+            cmd += f' --source-branch {params.get("head", "")}'
+            cmd += f' --title "{params.get("title", "")}"'
+            cmd += f' --description "{params.get("body", "")}"'
+        elif op == "list-pr":
+            cmd = f'glab mr list'
+            cmd += f' --target-branch {params.get("base", "main")}'
+            cmd += f' --source-branch {params.get("head", "")}'
+            state = params.get("state", "open")
+            cmd += f' --state {"opened" if state == "open" else state}'
+            cmd += ' --output json'
+            if params.get("jq"):
+                cmd += f" | jq '{params['jq']}'"
+        elif op == "merge-pr":
+            cmd = f'glab mr merge {params.get("number", "")} --auto-merge --when-pipeline-succeeds'
+        elif op == "create-release":
+            cmd = f'glab release create "{params.get("tag", "")}" --name "{params.get("title", "")}"'
+            cmd += f' --notes "{params.get("notes", "")}"'
+        elif op == "edit-release":
+            cmd = f'glab release update "{params.get("tag", "")}"'
+            cmd += f' --notes "{params.get("notes", "")}"'
+        else:
+            print(json.dumps({"error": f"Unknown operation: {op}"}))
+            sys.exit(1)
+
+    print(cmd)
+
+
+# ── Subcommand: pr-body ───────────────────────────────────────────────────
+
+PR_BODY_TEMPLATES = {
+    "task-pick": """## Task {task_code} — {title}
+
+### Summary
+{summary}
+
+{issue_ref}
+---
+*Generated by Claude Code via `/task-pick`*""",
+
+    "test-engineer": """## Task {task_code} — {title}
+
+### Summary
+Task tested and verified by test-engineer.
+
+### Test Results
+{summary}
+
+{issue_ref}
+---
+*Generated by Claude Code via `/test-engineer`*""",
+
+    "git-publish": """## Changes
+{summary}
+
+{issue_ref}
+---
+*Generated by Claude Code via `/git-publish`*""",
+
+    "release": """## Changes
+{summary}
+
+{issue_ref}
+---
+*Generated by Claude Code via `/release`*""",
+}
+
+
+def cmd_pr_body(args):
+    """Generate a PR body from template."""
+    source = args.source
+    template = PR_BODY_TEMPLATES.get(source, PR_BODY_TEMPLATES["task-pick"])
+
+    issue_ref = ""
+    if args.issue_num:
+        issue_ref = f"### Related Issue\nRefs #{args.issue_num}"
+        if args.task_code:
+            issue_ref += f" ({args.task_code})"
+        issue_ref += "\n"
+
+    body = template.format(
+        task_code=args.task_code or "",
+        title=args.title or "",
+        summary=args.summary or "",
+        issue_ref=issue_ref,
+    )
+
+    # Clean up empty sections
+    body = re.sub(r'\n\n\n+', '\n\n', body)
+    print(body.strip())
+
+
 # ── CLI Setup ────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -952,9 +1257,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    # platform-config
+    p = sub.add_parser("platform-config", help="Return platform tracker configuration")
+    p.set_defaults(func=cmd_platform_config)
+
     # next-id
     p = sub.add_parser("next-id", help="Compute next sequential ID")
     p.add_argument("--type", choices=["task", "idea"], default="task")
+    p.add_argument("--source", choices=["local", "platform-titles"], default="local",
+                    help="Data source: local files (default) or platform titles from stdin")
     p.set_defaults(func=cmd_next_id)
 
     # list
@@ -1024,6 +1335,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=50, help="Max results")
     p.add_argument("--format", choices=["json", "text"], default="text")
     p.set_defaults(func=cmd_find_files)
+
+    # platform-cmd
+    p = sub.add_parser("platform-cmd", help="Generate platform-specific CLI command")
+    p.add_argument("operation", help="Operation name (e.g., create-issue, list-issues)")
+    p.add_argument("params", nargs="*", help="Key=value parameters (e.g., title=T labels=L)")
+    p.set_defaults(func=cmd_platform_cmd)
+
+    # pr-body
+    p = sub.add_parser("pr-body", help="Generate PR body from template")
+    p.add_argument("--task-code", default=None, help="Task code (e.g., AUTH-001)")
+    p.add_argument("--title", default=None, help="Task or PR title")
+    p.add_argument("--summary", default=None, help="Summary of changes")
+    p.add_argument("--issue-num", default=None, help="Related issue number")
+    p.add_argument("--source", choices=["task-pick", "test-engineer", "git-publish", "release"],
+                    default="task-pick", help="Source skill for template selection")
+    p.set_defaults(func=cmd_pr_body)
 
     return parser
 

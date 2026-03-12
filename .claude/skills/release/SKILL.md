@@ -13,20 +13,14 @@ Always respond and work in English.
 
 ## Current State
 
-### Current version:
-!`node -p "require('./package.json').version" 2>/dev/null || python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])" 2>/dev/null || echo "unknown"`
-
-### Latest git tag:
-!`git tag -l '[TAG_PREFIX]*' --sort=-v:refname | head -1 || echo "(no tags)"`
+### Version and tag info:
+!`python3 .claude/scripts/release_manager.py current-version --tag-prefix "[TAG_PREFIX]"`
 
 ### Current branch:
 !`git branch --show-current`
 
 ### Working tree status:
 !`git status --porcelain | head -5; count=$(git status --porcelain | wc -l); [ "$count" -gt 5 ] && echo "... and $((count - 5)) more files" || true`
-
-### Commits since last tag:
-!`TAG=$(git tag -l '[TAG_PREFIX]*' --sort=-v:refname | head -1); if [ -n "$TAG" ]; then git log "$TAG"..HEAD --oneline --no-merges | head -20; else git log --oneline --no-merges | head -20; fi`
 
 ## Arguments
 
@@ -36,27 +30,17 @@ The user invoked with: **$ARGUMENTS**
 
 ### Platform Detection
 
-Before executing any platform-specific command, detect the active tracker platform:
+!`python3 .claude/scripts/task_manager.py platform-config`
 
-```bash
-TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
-PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
-TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
-```
+Use the `mode` field to determine behavior: `platform-only`, `dual-sync`, or `local-only`. The JSON includes `platform`, `enabled`, `sync`, `repo`, `cli` (gh/glab), and `labels`.
 
 ## Platform Commands
 
-| Operation | GitHub | GitLab |
-|-----------|--------|--------|
-| Create PR/MR | `gh pr create --base B --head H --title T --body B` | `glab mr create --target-branch B --source-branch H --title T --description B` |
-| List PR/MR | `gh pr list --base B --head H --state open --json f --jq 'e'` | `glab mr list --target-branch B --source-branch H --state opened --output json \| jq 'e'` |
-| Merge PR/MR | `gh pr merge URL --auto --merge` | `glab mr merge N --auto-merge --when-pipeline-succeeds` |
-| View PR/MR | `gh pr view URL --json state --jq '.state'` | `glab mr view N --output json \| jq '.state'` |
-| List issues | `gh issue list --repo "$TRACKER_REPO" --search "term in:title" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
-| Create release | `gh release create tag --title T --notes N` | `glab release create tag --name T --notes N` |
-| Edit release | `gh release edit tag --notes N` | `glab release update tag --notes N` |
+Use `python3 .claude/scripts/task_manager.py platform-cmd <operation> [key=value ...]` to generate the correct CLI command for the detected platform (GitHub/GitLab).
+
+Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`, `close-issue`, `comment-issue`, `create-issue`, `create-pr`, `list-pr`, `merge-pr`, `create-release`, `edit-release`.
+
+Example: `python3 .claude/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
 ### Step 1: Pre-flight Checks
 
@@ -111,47 +95,31 @@ STOP HERE after calling `AskUserQuestion`. Do NOT proceed until the user respond
 
 ### Step 2: Determine Last Release
 
-From the "Current State" section:
-
-1. Read the **Latest git tag** value. This is the last release tag.
-2. Read the **Current version** value.
-3. If no tags exist, this is the first tagged release. Use the full commit history and treat the current version as the base version to increment from.
+Read the `version`, `is_beta`, `base_version`, and `latest_tag` fields from the "Version and tag info" JSON above.
 
 Store:
-- `LAST_TAG` — the most recent `[TAG_PREFIX]*` tag (or empty if none)
-- `CURRENT_VERSION` — the version string (e.g., `1.0.0`)
-- `IS_BETA` — `true` if `CURRENT_VERSION` ends with `-beta`, `false` otherwise
-- `BASE_VERSION` — `CURRENT_VERSION` with the `-beta` suffix stripped (e.g., `2.0.0-beta` → `2.0.0`). Equals `CURRENT_VERSION` when `IS_BETA` is `false`
+- `LAST_TAG` — the `latest_tag` value (or empty if `null`)
+- `CURRENT_VERSION` — the `version` value
+- `IS_BETA` / `BASE_VERSION` — from the JSON fields
 
-### Step 3: Collect Changes Since Last Release
+### Step 3: Collect and Classify Changes
 
-Gather all commits since the last tag:
-
+Run the commit parser:
 ```bash
-# If a tag exists:
-git log <LAST_TAG>..HEAD --oneline --no-merges
-
-# If no tags exist:
-git log --oneline --no-merges
+python3 .claude/scripts/release_manager.py parse-commits --since "$LAST_TAG"
 ```
+(Omit `--since` if no previous tag exists.)
 
-For each commit, parse:
-1. **Conventional commit prefix** — `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `perf:`, `test:`, `ci:`, `style:`, `build:`, `revert:`, or `feat!:`/`fix!:` for breaking changes
-2. **Task code** — parenthesized code at the end like `(TASK-001)`
-3. **Description** — the commit message body after the prefix
+This returns JSON with:
+- `commits[]` — each commit with `prefix`, `description`, `task_code`, `changelog_category`, `is_breaking`
+- `summary` — counts: `total`, `features`, `fixes`, `breaking`, `excluded`, `has_meaningful_changes`
+- `suggested_bump` — auto-detected bump type (`major`/`minor`/`patch`)
 
-Also check for `BREAKING CHANGE:` in commit bodies:
-```bash
-git log <LAST_TAG>..HEAD --no-merges --format="%B" | grep -c "BREAKING CHANGE"
-```
-
-**Cross-reference task titles:** For any task codes found in commits, look up the task title for richer changelog entries.
-
-- **In platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true` — check `"$TRACKER_CFG"`): Use `gh issue list --repo "$TRACKER_REPO" --search "[$CODE] in:title" --label task --json title --jq '.[0].title'` to find task titles.
-  <!-- GitLab: glab issue list -R "$TRACKER_REPO" --search "[$CODE]" -l task --output json | jq '.[0].title' -->
+**Cross-reference task titles:** For any `task_code` values in commits, look up the task title for richer changelog entries:
+- **In platform-only mode**: Use the platform CLI to search for the task title.
 - **In local/dual mode**: Read `done.txt` and extract the task title.
 
-**If zero meaningful changes are found** (only `chore: update` type commits with no features or fixes):
+**If `has_meaningful_changes` is `false`:**
 
 Warn the user: "No significant changes detected since the last release. Only maintenance commits found."
 
@@ -185,27 +153,16 @@ STOP HERE after calling `AskUserQuestion`. Do NOT proceed until the user respond
 
 If promoting: set `NEW_VERSION = BASE_VERSION` and skip to Step 4c.
 
-#### 4b: Determine bump type
+#### 4b: Compute new version
 
-Classify detected changes to determine the bump type:
+Run the bump calculator:
+```bash
+python3 .claude/scripts/release_manager.py suggest-bump --current-version "$CURRENT_VERSION" --suggested-bump "$SUGGESTED_BUMP"
+```
 
-| Change type | Bump | Trigger |
-|-------------|------|---------|
-| `BREAKING CHANGE` or `!` suffix (e.g., `feat!:`) | **major** | Any breaking change commit |
-| `feat:` | **minor** | Any new feature commit |
-| `fix:`, `refactor:`, `perf:` | **patch** | Bug fixes and improvements only |
+If `$ARGUMENTS` contains `major`, `minor`, or `patch`, add `--force $ARGUMENTS` to override auto-detection.
 
-**Priority:** major > minor > patch. Use the highest applicable bump.
-
-**If `$ARGUMENTS` contains `major`, `minor`, or `patch`:** use that override instead of auto-detection.
-
-Calculate the new version by incrementing `BASE_VERSION`:
-- **major**: `X.0.0` (reset minor and patch)
-- **minor**: `M.X.0` (reset patch)
-- **patch**: `M.N.X`
-
-**Major bumps always start as beta.** If the bump type is `major`, append `-beta` to the version:
-- `X.0.0` becomes `X.0.0-beta`
+The script handles: version arithmetic, major→beta suffix, reset rules. Read the `new_version` and `bump_type` from the output.
 
 #### 4c: Confirm version
 
@@ -230,29 +187,16 @@ STOP HERE after calling `AskUserQuestion`. Do NOT proceed until the user respond
 
 ### Step 5: Generate Changelog Entries
 
-Map each commit to a [Keep a Changelog](https://keepachangelog.com/) category:
+Run the changelog generator by piping the parse-commits output:
+```bash
+python3 .claude/scripts/release_manager.py parse-commits --since "$LAST_TAG" | python3 .claude/scripts/release_manager.py generate-changelog --version "$NEW_VERSION" --date "$(date +%Y-%m-%d)"
+```
 
-| Commit prefix | Changelog category |
-|---------------|-------------------|
-| `feat:` | `### Added` |
-| `fix:` | `### Fixed` |
-| `refactor:`, `perf:` | `### Changed` |
-| `revert:` | `### Removed` |
-| Security-related (contains "security", "CVE", "vulnerability", or auth hardening) | `### Security` |
-| `docs:`, `chore:`, `ci:`, `test:`, `style:`, `build:` | **Excluded** (not user-facing) |
-
-**Commits without a conventional prefix:** Classify by keyword analysis:
-- Starts with "Add"/"Implement"/"Create" → Added
-- Starts with "Fix"/"Resolve"/"Correct" → Fixed
-- Starts with "Remove"/"Delete"/"Drop" → Removed
-- Starts with "Update"/"Refactor"/"Improve"/"Optimize" → Changed
-- Otherwise → Changed (default)
-
-**Format each entry as:**
-- `- Description (TASK-CODE)` — when a task code is present
-- `- Description` — when no task code
-
-**Group entries** under their category headers, in this order: Added, Changed, Fixed, Removed, Security. Only include categories that have entries.
+This automatically:
+- Maps commits to Keep a Changelog categories (Added, Changed, Fixed, Removed, Security)
+- Excludes non-user-facing commits (chore, ci, test, docs, style, build)
+- Formats entries with task codes where present
+- Orders sections: Added > Changed > Fixed > Removed > Security
 
 ### Step 6: Confirm Changelog Content
 
