@@ -46,6 +46,8 @@ PROGRESS_COUNT=$(gh issue list --repo "$TRACKER_REPO" --label "task,status:in-pr
 # GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:in-progress" --state opened --output json | jq 'length'
 DONE_COUNT=$(gh issue list --repo "$TRACKER_REPO" --label "task,status:done" --state closed --json number --jq 'length' 2>/dev/null)
 # GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:done" --state closed --output json | jq 'length'
+TOTEST_COUNT=$(gh issue list --repo "$TRACKER_REPO" --label "task,status:to-test" --state open --json number --jq 'length' 2>/dev/null)
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:to-test" --state opened --output json | jq 'length'
 ```
 
 ### In-Progress Tasks
@@ -53,6 +55,13 @@ DONE_COUNT=$(gh issue list --repo "$TRACKER_REPO" --label "task,status:done" --s
 ```bash
 gh issue list --repo "$TRACKER_REPO" --label "task,status:in-progress" --state open --json number,title,labels --jq '.[] | "#\(.number) \(.title)"'
 # GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:in-progress" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"'
+```
+
+### To-Test Tasks
+
+```bash
+gh issue list --repo "$TRACKER_REPO" --label "task,status:to-test" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:to-test" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"'
 ```
 
 ### Completed Tasks
@@ -115,13 +124,15 @@ These sections are used in local-only or dual-sync mode:
 
 Present the information above as a structured English-language report with these sections:
 
-1. **Summary** — A table with task counts by status (completed, in-progress, todo, blocked) and overall progress percentage.
+1. **Summary** — A table with task counts by status (completed, in-progress, to-test, todo, blocked) and overall progress percentage.
 
 2. **In-Progress Tasks** — For each task marked `[~]` (local) or with `status:in-progress` label (platform), show:
    - Task code and title
    - Priority
    - What remains to be done
    - Files involved
+
+2.5. **To-Test Tasks** — (Platform-only mode) For each task with `status:to-test` label, show the task code, title, and note that testing is pending. Suggest running `/test-engineer TASK-CODE` to complete testing.
 
 3. **Next Recommended Tasks** — Based on the recommended implementation order (local mode) or priority labels (platform-only mode), identify the next 2-3 tasks that should be picked up. For each show:
    - Task code and title

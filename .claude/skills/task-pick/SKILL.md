@@ -334,6 +334,20 @@ Present it in this format:
 
 The guide must be actionable and specific — use real URLs, real UI element names, and real API endpoints from the implementation. Do not use generic placeholders.
 
+**6a.5. Mark task as to-test:**
+
+Before asking the user to confirm, add the `status:to-test` label to signal the task is awaiting test verification. Keep the `status:in-progress` label in place — `to-test` is an additive marker.
+
+**In platform-only or dual sync mode:**
+```bash
+ISSUE_NUM=$(gh issue list --repo "$TRACKER_REPO" --search "[TASK-CODE] in:title" --label task --state open --json number --jq '.[0].number')
+# GitLab: glab issue list -R "$TRACKER_REPO" --search "[TASK-CODE]" -l task --state opened --output json | jq '.[0].iid'
+gh issue edit "$ISSUE_NUM" --repo "$TRACKER_REPO" --add-label "status:to-test"
+# GitLab: glab issue update "$ISSUE_NUM" -R "$TRACKER_REPO" --label "status:to-test"
+```
+
+**In local only mode:** No label change needed — the to-test state is implicit within this flow.
+
 **6b. Ask for user confirmation:**
 
 Present a summary of what was done and ask the user to confirm:
@@ -343,15 +357,30 @@ Present a summary of what was done and ask the user to confirm:
 > **Summary of work done:**
 > - [brief list of what was created/modified]
 >
+> The task has been marked as **status:to-test**. Please review the testing guide above.
+>
 > Can you confirm this task is done?"
 
 Use `AskUserQuestion` with options:
-- **"Yes, task is done"** — proceed to 6c
-- **"Not yet, needs more work"** — stop the completion flow; the task stays in-progress
+- **"Yes, task is done (tests passed)"** — proceed to 6b.5 then 6c (full flow including merge option)
+- **"Not yet, needs more work"** — proceed to 6b.5 then stop the completion flow; the task stays in-progress
+- **"Skip testing, conclude task"** — proceed to 6b.5 then 6c (mark done, but branch will NOT be merged to release)
+
+**6b.5. Remove to-test label:**
+
+After the user responds to 6b, always remove the `status:to-test` label regardless of which option was chosen:
+
+**In platform-only or dual sync mode:**
+```bash
+gh issue edit "$ISSUE_NUM" --repo "$TRACKER_REPO" --remove-label "status:to-test"
+# GitLab: glab issue update "$ISSUE_NUM" -R "$TRACKER_REPO" --unlabel "status:to-test"
+```
+
+**In local only mode:** No action needed.
 
 **6c. Mark task as done:**
 
-Once the user confirms the work is done:
+Once the user confirms the work is done (either "Yes, task is done (tests passed)" or "Skip testing, conclude task"):
 
 **In platform-only mode:**
 ```bash
@@ -359,9 +388,20 @@ ISSUE_NUM=$(gh issue list --repo "$TRACKER_REPO" --search "[TASK-CODE] in:title"
 # GitLab: glab issue list -R "$TRACKER_REPO" --search "[TASK-CODE]" -l task --state opened --output json | jq '.[0].iid'
 gh issue edit "$ISSUE_NUM" --repo "$TRACKER_REPO" --remove-label "status:in-progress" --add-label "status:done"
 # GitLab: glab issue update "$ISSUE_NUM" -R "$TRACKER_REPO" --unlabel "status:in-progress" --label "status:done"
+```
+
+If the user chose **"Yes, task is done (tests passed)"**:
+```bash
 gh issue close "$ISSUE_NUM" --repo "$TRACKER_REPO" --comment "Task completed and verified. Quality gate passed."
 # GitLab: glab issue close "$ISSUE_NUM" -R "$TRACKER_REPO"
 # GitLab: glab issue note "$ISSUE_NUM" -R "$TRACKER_REPO" -m "Task completed and verified. Quality gate passed."
+```
+
+If the user chose **"Skip testing, conclude task"**:
+```bash
+gh issue close "$ISSUE_NUM" --repo "$TRACKER_REPO" --comment "Task completed. Quality gate passed. Manual testing was skipped by user. Branch not merged to release."
+# GitLab: glab issue close "$ISSUE_NUM" -R "$TRACKER_REPO"
+# GitLab: glab issue note "$ISSUE_NUM" -R "$TRACKER_REPO" -m "Task completed. Quality gate passed. Manual testing was skipped by user. Branch not merged to release."
 ```
 
 **In dual sync mode:**
@@ -388,9 +428,11 @@ Use `AskUserQuestion` with options:
 - **"Yes, commit"** — create a commit using the `/commit` skill (or follow the standard git commit workflow). The commit message should reference the task code and briefly describe what was implemented.
 - **"No, skip commit"** — skip the commit; done.
 
-**6e. Ask to merge into the release branch:**
+**6e. Ask to merge into the release branch (TESTS PASSED ONLY):**
 
-Use `AskUserQuestion` with options:
+**Important:** This step is ONLY executed when the user chose **"Yes, task is done (tests passed)"** in step 6b. Tasks that skipped testing must NOT be merged into the release branch to prevent untested or broken features from reaching production.
+
+**If testing was confirmed**, use `AskUserQuestion` with options:
 - **"Yes, merge into [RELEASE_BRANCH]"** — execute:
   ```bash
   git checkout [RELEASE_BRANCH]
@@ -399,5 +441,10 @@ Use `AskUserQuestion` with options:
   Use `--no-ff` to preserve branch history.
 
 - **"No, stay on task branch"** — skip the merge
+
+**If testing was skipped**, do NOT offer the merge. Instead, inform the user:
+
+> "Task [TASK-CODE] was closed without testing confirmation. The task branch `task/<task-code-lowercase>` has **NOT** been merged into [RELEASE_BRANCH].
+> Run `/test-engineer [TASK-CODE]` to complete testing before merging."
 
 **Important:** Always ask — never auto-commit, auto-close, or auto-merge without user confirmation.

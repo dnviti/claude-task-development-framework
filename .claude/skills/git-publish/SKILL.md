@@ -25,6 +25,38 @@ The user invoked with: **$ARGUMENTS**
 
 ## Instructions
 
+### Step 0: Check for untested tasks
+
+Before pushing to the release branch, verify that no `status:to-test` tasks exist that could introduce untested code.
+
+```bash
+TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
+PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
+```
+
+**If `TRACKER_ENABLED` is `true`:**
+```bash
+TOTEST_TASKS=$(gh issue list --repo "$TRACKER_REPO" --label "task,status:to-test" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null)
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:to-test" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"'
+```
+
+If any to-test tasks are found, warn the user:
+
+> "**Warning:** The following tasks are still awaiting testing:
+> - [list of to-test tasks]
+>
+> Publishing may push untested features to the release branch. Consider running `/test-engineer` to complete testing first."
+
+Use `AskUserQuestion` with options:
+- **"Continue publishing anyway"** — proceed to Step 1
+- **"Abort and test first"** — stop here
+
+STOP HERE after calling `AskUserQuestion`. Do NOT proceed until the user responds.
+
+**If `TRACKER_ENABLED` is `false` or config missing:** Skip this check.
+
 ### Step 1: Commit if needed
 
 Check for uncommitted changes:

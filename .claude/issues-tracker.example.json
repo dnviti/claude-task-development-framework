@@ -15,6 +15,7 @@
     "status": {
       "todo": "status:todo",
       "in-progress": "status:in-progress",
+      "to-test": "status:to-test",
       "done": "status:done"
     },
     "sections": {}

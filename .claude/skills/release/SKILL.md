@@ -60,7 +60,32 @@ TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
 
 ### Step 1: Pre-flight Checks
 
-Check the working tree and branch status from the "Current State" section above.
+**1a. Check for untested tasks:**
+
+Before proceeding with any release, verify that no `status:to-test` tasks exist that could introduce untested code into the release.
+
+**In platform-only or dual sync mode:**
+```bash
+TOTEST_TASKS=$(gh issue list --repo "$TRACKER_REPO" --label "task,status:to-test" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null)
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:to-test" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"'
+```
+
+If any to-test tasks are found, warn the user:
+
+> "**Warning:** The following tasks are still awaiting testing:
+> - [list of to-test tasks]
+>
+> Their changes may be on the release branch. Consider running `/test-engineer` to complete testing before releasing."
+
+Use `AskUserQuestion` with options:
+- **"Continue release anyway"** — proceed to the next check
+- **"Abort and test first"** — stop here
+
+STOP HERE after calling `AskUserQuestion`. Do NOT proceed until the user responds.
+
+**In local only mode:** Skip this check (no platform labels to query).
+
+**1b. Check the working tree and branch status** from the "Current State" section above.
 
 **If the working tree is dirty (uncommitted changes):**
 

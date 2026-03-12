@@ -56,6 +56,8 @@ Tasks are split across three files by status:
 
 When a task changes status, move it to the corresponding file.
 
+**Additional platform label:** Tasks in `progressing.txt` may also carry `status:to-test` on the platform, indicating they are awaiting test verification. Task branches must not be merged into the release branch until testing is confirmed.
+
 ### Idea Files
 
 Ideas are stored separately from tasks and must be explicitly approved before entering the task pipeline:

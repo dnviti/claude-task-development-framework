@@ -90,6 +90,7 @@ for key in $(jq -r '.labels.status | keys[]' "$CONFIG"); do
   case "$key" in
     todo)        color="cfd3d7" ;;
     in-progress) color="fbca04" ;;
+    to-test)     color="d4c5f9" ;;
     done)        color="0e8a16" ;;
     *)           color="ededed" ;;
   esac
