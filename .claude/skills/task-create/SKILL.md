@@ -16,24 +16,34 @@ Always respond and work in English. The task block content (field labels, descri
 Determine the operating mode first:
 
 ```bash
-GH_ENABLED="$(jq -r '.enabled // false' .claude/github-issues.json 2>/dev/null)"
-GH_SYNC="$(jq -r '.sync // false' .claude/github-issues.json 2>/dev/null)"
-GH_REPO="$(jq -r '.repo' .claude/github-issues.json 2>/dev/null)"
+TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
+PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
 ```
 
-- **GitHub-only mode** (`GH_ENABLED=true` AND `GH_SYNC != true`): Use GitHub Issues exclusively. No local file operations.
-- **Dual sync mode** (`GH_ENABLED=true` AND `GH_SYNC=true`): Write local files first, then sync to GitHub.
-- **Local only mode** (`GH_ENABLED=false` or config missing): Use local files only.
+- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Use platform issues exclusively. No local file operations.
+- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Write local files first, then sync to GitHub.
+- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Use local files only.
+
+## Platform Commands
+
+| Operation | GitHub | GitLab |
+|-----------|--------|--------|
+| List issues (JSON) | `gh issue list --repo "$TRACKER_REPO" --label L --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --output json \| jq 'e'` |
+| Create issue | `gh issue create --repo "$TRACKER_REPO" --title T --body B --label L` | `glab issue create -R "$TRACKER_REPO" --title T --description B -l L` |
+| Search issues | `gh issue list --repo "$TRACKER_REPO" --search "term in:title" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
 
 ## Current Task State
 
-### In GitHub-only mode:
+### In Platform-only mode:
 
 #### Highest task IDs (last 20, sorted by number):
-!`GH_REPO="$(jq -r '.repo' .claude/github-issues.json 2>/dev/null)"; gh issue list --repo "$GH_REPO" --label task --state all --limit 500 --json title --jq '.[].title' | grep -oE '[A-Z][A-Z0-9]+-[0-9]{3}' | sort -t'-' -k2 -n | tail -20`
+!`CFG=".claude/issues-tracker.json"; [ ! -f "$CFG" ] && CFG=".claude/github-issues.json"; TRACKER_REPO="$(jq -r '.repo' "$CFG" 2>/dev/null)"; gh issue list --repo "$TRACKER_REPO" --label task --state all --limit 500 --json title --jq '.[].title' | grep -oE '[A-Z][A-Z0-9]+-[0-9]{3}' | sort -t'-' -k2 -n | tail -20`
 
 #### All prefixes currently in use:
-!`GH_REPO="$(jq -r '.repo' .claude/github-issues.json 2>/dev/null)"; gh issue list --repo "$GH_REPO" --label task --state all --limit 500 --json title --jq '.[].title' | grep -oE '[A-Z][A-Z0-9]+-[0-9]{3}' | sed 's/-[0-9]*//' | sort -u`
+!`CFG=".claude/issues-tracker.json"; [ ! -f "$CFG" ] && CFG=".claude/github-issues.json"; TRACKER_REPO="$(jq -r '.repo' "$CFG" 2>/dev/null)"; gh issue list --repo "$TRACKER_REPO" --label task --state all --limit 500 --json title --jq '.[].title' | grep -oE '[A-Z][A-Z0-9]+-[0-9]{3}' | sed 's/-[0-9]*//' | sort -u`
 
 ### In local only and dual sync modes:
 
@@ -43,9 +53,9 @@ GH_REPO="$(jq -r '.repo' .claude/github-issues.json 2>/dev/null)"
 #### Section headers in to-do.txt:
 !`python3 scripts/task_manager.py sections --file to-do.txt`
 
-### Section info (GitHub-only mode):
+### Section info (Platform-only mode):
 
-In GitHub-only mode, section information is derived from the label mappings in `.claude/github-issues.json` rather than from `to-do.txt`. Read the `labels.sections` mapping from the config to determine available sections and their labels.
+In Platform-only mode, section information is derived from the label mappings in `"$TRACKER_CFG"` rather than from `to-do.txt`. Read the `labels.sections` mapping from the config to determine available sections and their labels.
 
 ## Arguments
 
@@ -76,7 +86,7 @@ Analyze the task description and select an appropriate code prefix.
 
 Task numbering is **globally sequential** across all prefixes.
 
-**In GitHub-only mode:**
+**In Platform-only mode:**
 1. From the GitHub-sourced "Highest task IDs" data above, extract all numeric parts (e.g., `ORCH-065` -> 65).
 2. **Ignore false positives** like `AES-256` or `SHA-256` — these are not task codes but algorithm references. Only consider IDs where the prefix is a known task prefix or matches the pattern of a short alphabetical prefix.
 3. Find the maximum number.
@@ -92,14 +102,14 @@ Before writing the task block, explore the codebase to generate accurate technic
 1. **Read relevant existing files** based on the task description — identify the key source directories and files in the project.
 2. **Look at similar completed tasks** for pattern reference:
    - In local only / dual sync mode: check `done.txt` for a task with similar scope and mirror its structure.
-   - In GitHub-only mode: search closed issues with `gh issue list --repo "$GH_REPO" --label task --state closed --limit 10 --json title,body` for reference.
+   - In Platform-only mode: search closed issues with `gh issue list --repo "$TRACKER_REPO" --label task --state closed --limit 10 --json title,body` (GitLab: `glab issue list -R "$TRACKER_REPO" -l task --closed --output json | jq '.[:10]'`) for reference.
 3. **Identify files to create and modify** — be specific about file paths based on the actual directory structure. Use `Glob` to verify paths exist before listing them under `MODIFY`.
 
 ### Step 5: Draft the Task Block
 
-**In GitHub-only mode:** Draft the task as a GitHub Issue in **English**.
+**In Platform-only mode:** Draft the task as a platform issue in **English**.
 
-GitHub Issue format:
+Platform issue format:
 - **Title:** `[PREFIX-NNN] Task Title`
 - **Body:**
 
@@ -165,7 +175,7 @@ Template:
 
 ### Step 6: Present the Draft and Ask for Confirmation
 
-Present the complete task block (or GitHub Issue draft) to the user, along with:
+Present the complete task block (or platform issue draft) to the user, along with:
 
 1. **Task code:** The generated PREFIX-NNN
 2. **Suggested section:** Which section it should be placed in, with reasoning
@@ -180,10 +190,11 @@ Then use `AskUserQuestion` with these options:
 
 Before writing, perform a final duplicate check:
 
-**In GitHub-only mode:**
-1. Search GitHub issues for key concepts:
+**In Platform-only mode:**
+1. Search platform issues for key concepts:
    ```bash
-   gh issue list --repo "$GH_REPO" --label task --state all --search "keyword1 keyword2" --json title,number,state --jq '.[] | "#\(.number) [\(.state)] \(.title)"'
+   gh issue list --repo "$TRACKER_REPO" --label task --state all --search "keyword1 keyword2" --json title,number,state --jq '.[] | "#\(.number) [\(.state)] \(.title)"'
+   # GitLab: glab issue list -R "$TRACKER_REPO" -l task --search "keyword1 keyword2" --output json | jq '.[] | "#\(.iid) [\(.state)] \(.title)"'
    ```
 2. If a potentially similar task is found, warn the user and ask whether to proceed or abort.
 3. If no duplicates found, continue to Step 8.
@@ -196,7 +207,7 @@ Before writing, perform a final duplicate check:
 
 ### Step 8: Insert the Task into to-do.txt
 
-**In GitHub-only mode:** Skip this step entirely.
+**In Platform-only mode:** Skip this step entirely.
 
 **In local only and dual sync modes:**
 
@@ -210,20 +221,19 @@ Determine the correct insertion point based on the confirmed section.
 
 Use the `Edit` tool to insert the task block at the correct position.
 
-### Step 8.5: Sync to GitHub Issues
+### Step 8.5: Sync to Platform Issues
 
-**In GitHub-only mode:** This is the **primary write** step. Create the GitHub Issue:
+**In Platform-only mode:** This is the **primary write** step. Create the platform issue:
 
 1. Read the label mappings from config:
    ```bash
-   GH_REPO="$(jq -r '.repo' .claude/github-issues.json)"
-   PRIORITY_LABEL="$(jq -r ".labels.priority.\"$PRIORITY\"" .claude/github-issues.json)"
-   SECTION_LABEL="$(jq -r ".labels.sections.\"$SECTION_LETTER\"" .claude/github-issues.json)"
+   PRIORITY_LABEL="$(jq -r ".labels.priority.\"$PRIORITY\"" "$TRACKER_CFG")"
+   SECTION_LABEL="$(jq -r ".labels.sections.\"$SECTION_LETTER\"" "$TRACKER_CFG")"
    ```
 
-2. Create the GitHub Issue:
+2. Create the platform issue:
    ```bash
-   ISSUE_URL=$(gh issue create --repo "$GH_REPO" \
+   ISSUE_URL=$(gh issue create --repo "$TRACKER_REPO" \
      --title "[PREFIX-NNN] Task Title" \
      --body "$(cat <<'EOF'
    **Code:** PREFIX-NNN | **Priority:** PRIORITY | **Section:** SECTION_NAME | **Dependencies:** DEPS
@@ -243,22 +253,22 @@ Use the `Edit` tool to insert the task block at the correct position.
    EOF
    )" \
      --label "claude-code,task,$PRIORITY_LABEL,status:todo,$SECTION_LABEL")
+   # GitLab: glab issue create -R "$TRACKER_REPO" --title "[PREFIX-NNN] Task Title" --description "BODY" -l "claude-code,task,$PRIORITY_LABEL,status:todo,$SECTION_LABEL"
    ```
 
-3. If the `gh` command fails, report the error to the user. In GitHub-only mode this is a hard failure since there is no local fallback.
+3. If the platform CLI command fails, report the error to the user. In Platform-only mode this is a hard failure since there is no local fallback.
 
 **In dual sync mode:**
 
 1. Read the label mappings from config:
    ```bash
-   GH_REPO="$(jq -r '.repo' .claude/github-issues.json)"
-   PRIORITY_LABEL="$(jq -r ".labels.priority.\"$PRIORITY\"" .claude/github-issues.json)"
-   SECTION_LABEL="$(jq -r ".labels.sections.\"$SECTION_LETTER\"" .claude/github-issues.json)"
+   PRIORITY_LABEL="$(jq -r ".labels.priority.\"$PRIORITY\"" "$TRACKER_CFG")"
+   SECTION_LABEL="$(jq -r ".labels.sections.\"$SECTION_LETTER\"" "$TRACKER_CFG")"
    ```
 
-2. Create the GitHub Issue:
+2. Create the platform issue:
    ```bash
-   ISSUE_URL=$(gh issue create --repo "$GH_REPO" \
+   ISSUE_URL=$(gh issue create --repo "$TRACKER_REPO" \
      --title "[PREFIX-NNN] Task Title" \
      --body "$(cat <<'EOF'
    **Code:** PREFIX-NNN | **Priority:** PRIORITY | **Section:** SECTION_NAME | **Dependencies:** DEPS
@@ -278,6 +288,7 @@ Use the `Edit` tool to insert the task block at the correct position.
    EOF
    )" \
      --label "claude-code,task,$PRIORITY_LABEL,status:todo,$SECTION_LABEL")
+   # GitLab: glab issue create -R "$TRACKER_REPO" --title "[PREFIX-NNN] Task Title" --description "BODY" -l "claude-code,task,$PRIORITY_LABEL,status:todo,$SECTION_LABEL"
    ```
 
 3. Extract the issue number from the URL:
@@ -295,9 +306,9 @@ Use the `Edit` tool to insert the task block at the correct position.
 
 After successfully creating the task, report:
 
-**In GitHub-only mode:**
+**In Platform-only mode:**
 
-> "Task **PREFIX-NNN — Task Title** has been created as GitHub Issue.
+> "Task **PREFIX-NNN — Task Title** has been created as platform issue.
 >
 > - **Code:** PREFIX-NNN
 > - **Priority:** HIGH/MEDIUM/LOW
@@ -337,10 +348,10 @@ Sections are defined in `to-do.txt`. Read the section headers to understand the 
 ## Important Rules
 
 1. **In local only and dual sync modes, NEVER modify `progressing.txt` or `done.txt`** — only append to `to-do.txt`.
-2. **NEVER create duplicate tasks** — always cross-reference existing tasks first (GitHub issues in GitHub-only mode, local files in local/dual mode).
+2. **NEVER create duplicate tasks** — always cross-reference existing tasks first (platform issues in Platform-only mode, local files in local/dual mode).
 3. **NEVER reuse a task number that already exists** — always use global max + 1.
 4. **NEVER skip user confirmation** — always present the draft and wait for approval.
 5. **English content in task blocks** — field labels (`Priority`, `Dependencies`, `DESCRIPTION`, `TECHNICAL DETAILS`, `Files involved`, `CREATE`, `MODIFY`) and descriptions are always in English.
 6. **Accurate file paths** — only reference files that actually exist (for `MODIFY`) or directories that exist (for `CREATE`). Verify with `Glob` before listing.
-7. **Follow the exact formatting** — in local/dual mode: same indentation, same dash count (78), same field order as existing tasks. In GitHub-only mode: use the GitHub Issue markdown format specified in Step 5.
-8. **In GitHub-only mode, NEVER modify local task files** (`to-do.txt`, `progressing.txt`, `done.txt`) — all operations go through GitHub Issues exclusively.
+7. **Follow the exact formatting** — in local/dual mode: same indentation, same dash count (78), same field order as existing tasks. In Platform-only mode: use the platform issue markdown format specified in Step 5.
+8. **In Platform-only mode, NEVER modify local task files** (`to-do.txt`, `progressing.txt`, `done.txt`) — all operations go through platform issues exclusively.

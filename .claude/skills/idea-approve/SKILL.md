@@ -18,24 +18,37 @@ Always respond and work in English. The task block content (field labels, descri
 Determine the operating mode first:
 
 ```bash
-GH_ENABLED="$(jq -r '.enabled // false' .claude/github-issues.json 2>/dev/null)"
-GH_SYNC="$(jq -r '.sync // false' .claude/github-issues.json 2>/dev/null)"
-GH_REPO="$(jq -r '.repo' .claude/github-issues.json 2>/dev/null)"
+TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
+PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
 ```
 
-- **GitHub-only mode** (`GH_ENABLED=true` AND `GH_SYNC != true`): All operations happen on GitHub Issues. No local file reads or writes. All content in **English**.
-- **Dual sync mode** (`GH_ENABLED=true` AND `GH_SYNC=true`): Write to local files first, then sync to GitHub.
-- **Local only mode** (`GH_ENABLED=false` or config missing): Write to local files only.
+- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): All operations happen on platform issues. No local file reads or writes. All content in **English**.
+- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Write to local files first, then sync to platform.
+- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Write to local files only.
+
+## Platform Commands
+
+| Operation | GitHub | GitLab |
+|-----------|--------|--------|
+| List issues | `gh issue list --repo "$TRACKER_REPO" --label L --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --output json \| jq 'e'` |
+| Search issues | `gh issue list --repo "$TRACKER_REPO" --search "term in:title" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
+| View issue | `gh issue view N --repo "$TRACKER_REPO" --json title,body,number` | `glab issue view N -R "$TRACKER_REPO" --output json` |
+| Create issue | `gh issue create --repo "$TRACKER_REPO" --title T --body B --label L` | `glab issue create -R "$TRACKER_REPO" --title T --description B -l L` |
+| Close issue | `gh issue close N --repo "$TRACKER_REPO" --comment "msg"` | `glab issue close N -R "$TRACKER_REPO"` then `glab issue note N -R "$TRACKER_REPO" -m "msg"` |
+| Comment on issue | `gh issue comment N --repo "$TRACKER_REPO" --body "msg"` | `glab issue note N -R "$TRACKER_REPO" -m "msg"` |
 
 ## Current State
 
-### GitHub-only mode queries:
+### Platform-only mode queries:
 
 Ideas available for approval:
-!`jq -r 'if (.enabled == true) and (.sync != true) then .repo else empty end' .claude/github-issues.json 2>/dev/null | xargs -I{} gh issue list --repo {} --label idea --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null`
+!`CFG=".claude/issues-tracker.json"; [ ! -f "$CFG" ] && CFG=".claude/github-issues.json"; jq -r 'if (.enabled == true) and (.sync != true) then .repo else empty end' "$CFG" 2>/dev/null | xargs -I{} gh issue list --repo {} --label idea --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null`
 
 Highest task IDs from GitHub (last 20):
-!`jq -r 'if (.enabled == true) and (.sync != true) then .repo else empty end' .claude/github-issues.json 2>/dev/null | xargs -I{} gh issue list --repo {} --label task --state all --limit 500 --json title --jq '.[].title' 2>/dev/null | grep -oE '[A-Z][A-Z0-9]+-[0-9]{3}' | sort -t'-' -k2 -n | tail -20`
+!`CFG=".claude/issues-tracker.json"; [ ! -f "$CFG" ] && CFG=".claude/github-issues.json"; jq -r 'if (.enabled == true) and (.sync != true) then .repo else empty end' "$CFG" 2>/dev/null | xargs -I{} gh issue list --repo {} --label task --state all --limit 500 --json title --jq '.[].title' 2>/dev/null | grep -oE '[A-Z][A-Z0-9]+-[0-9]{3}' | sort -t'-' -k2 -n | tail -20`
 
 ### Local / dual sync mode queries:
 
@@ -56,8 +69,9 @@ The user wants to approve: **$ARGUMENTS**
 
 ### Step 1: Select the Idea
 
-**GitHub-only mode:**
-- **If an IDEA-NNN code was provided**: Search GitHub Issues: `gh issue list --repo "$GH_REPO" --search "[IDEA-NNN] in:title" --label idea --state open --json number,title`. If not found, inform the user and list available idea issues.
+**Platform-only mode:**
+- **If an IDEA-NNN code was provided**: Search platform issues: `gh issue list --repo "$TRACKER_REPO" --search "[IDEA-NNN] in:title" --label idea --state open --json number,title`. If not found, inform the user and list available idea issues.
+  <!-- GitLab: glab issue list -R "$TRACKER_REPO" --search "[IDEA-NNN]" -l idea --output json -->
 - **If no argument was provided**: List all open idea issues from the Current State data above. Use `AskUserQuestion` to ask the user which idea to approve.
 - If there are no open idea issues, inform the user: "No ideas available for approval. Use `/idea-create` to add ideas first."
 
@@ -68,8 +82,9 @@ The user wants to approve: **$ARGUMENTS**
 
 ### Step 2: Read the Full Idea
 
-**GitHub-only mode:**
-- Fetch the full idea issue body: `gh issue view IDEA_ISSUE_NUMBER --repo "$GH_REPO" --json title,body,number`
+**Platform-only mode:**
+- Fetch the full idea issue body: `gh issue view IDEA_ISSUE_NUMBER --repo "$TRACKER_REPO" --json title,body,number`
+  <!-- GitLab: glab issue view IDEA_ISSUE_NUMBER -R "$TRACKER_REPO" --output json -->
 - Extract the title, description, and motivation from the issue body.
 
 **Local / dual sync mode:**
@@ -95,7 +110,7 @@ Analyze the idea's description and category to select an appropriate task prefix
 
 Task numbering is **globally sequential** across all prefixes.
 
-**GitHub-only mode:**
+**Platform-only mode:**
 1. From the "Highest task IDs from GitHub" data above, extract all numeric parts.
 2. **Ignore false positives** like `AES-256` or `SHA-256`.
 3. Find the maximum number.
@@ -109,12 +124,12 @@ Use the `next_number` field from the "Next available task ID" JSON above. No man
 Before writing the task, explore the codebase to generate accurate technical details:
 
 1. **Read relevant existing files** based on the idea description — identify the key source directories and files in the project.
-2. **Look at similar completed tasks** — in local/dual mode check `done.txt`, in GitHub-only mode search closed task issues.
+2. **Look at similar completed tasks** — in local/dual mode check `done.txt`, in platform-only mode search closed task issues.
 3. **Identify files to create and modify** — be specific about file paths. Use `Glob` to verify paths exist before listing them.
 
 ### Step 6: Draft the Full Task
 
-**GitHub-only mode — draft as a GitHub Issue in English:**
+**Platform-only mode — draft as a platform issue in English:**
 
 Title: `[PREFIX-NNN] Task Title`
 
@@ -191,11 +206,13 @@ Then use `AskUserQuestion` with these options:
 
 ### Step 8: Check for Duplicates
 
-**GitHub-only mode:**
-Search GitHub Issues for similar tasks:
+**Platform-only mode:**
+Search platform issues for similar tasks:
 ```bash
-gh issue list --repo "$GH_REPO" --label task --state all --search "keyword1" --json number,title,state
-gh issue list --repo "$GH_REPO" --label task --state all --search "keyword2" --json number,title,state
+gh issue list --repo "$TRACKER_REPO" --label task --state all --search "keyword1" --json number,title,state
+# GitLab: glab issue list -R "$TRACKER_REPO" -l task --search "keyword1" --output json
+gh issue list --repo "$TRACKER_REPO" --label task --state all --search "keyword2" --json number,title,state
+# GitLab: glab issue list -R "$TRACKER_REPO" -l task --search "keyword2" --output json
 ```
 
 **Local / dual sync mode:**
@@ -207,7 +224,7 @@ Use 2-3 key terms from the task title and description. If the JSON output contai
 
 This step varies by mode:
 
-**GitHub-only mode:**
+**Platform-only mode:**
 Skip local file operations entirely. The task issue creation and idea issue closure happen in Step 9.5.
 
 **Local / dual sync mode — two operations:**
@@ -224,22 +241,25 @@ This cleanly removes the idea block and handles whitespace cleanup automatically
 
 ### Step 9.5: Sync to GitHub Issues
 
-**GitHub-only mode** — this IS the primary operation:
+**Platform-only mode** — this IS the primary operation:
 
 1. **Close the idea issue:**
    ```bash
-   IDEA_ISSUE=$(gh issue list --repo "$GH_REPO" --search "[IDEA-NNN] in:title" --label idea --state open --json number --jq '.[0].number' 2>/dev/null)
+   IDEA_ISSUE=$(gh issue list --repo "$TRACKER_REPO" --search "[IDEA-NNN] in:title" --label idea --state open --json number --jq '.[0].number' 2>/dev/null)
+   # GitLab: IDEA_ISSUE=$(glab issue list -R "$TRACKER_REPO" --search "[IDEA-NNN]" -l idea --output json | jq '.[0].iid')
    ```
    If found:
    ```bash
-   gh issue close "$IDEA_ISSUE" --repo "$GH_REPO" --comment "Approved and promoted to task [PREFIX-NNN]." 2>/dev/null || true
+   gh issue close "$IDEA_ISSUE" --repo "$TRACKER_REPO" --comment "Approved and promoted to task [PREFIX-NNN]." 2>/dev/null || true
+   # GitLab: glab issue close "$IDEA_ISSUE" -R "$TRACKER_REPO"
+   # GitLab: glab issue note "$IDEA_ISSUE" -R "$TRACKER_REPO" -m "Approved and promoted to task [PREFIX-NNN]."
    ```
 
 2. **Create the task issue:**
    ```bash
-   PRIORITY_LABEL="$(jq -r ".labels.priority.\"$PRIORITY\"" .claude/github-issues.json)"
-   SECTION_LABEL="$(jq -r ".labels.sections.\"$SECTION_LETTER\"" .claude/github-issues.json)"
-   TASK_ISSUE_URL=$(gh issue create --repo "$GH_REPO" \
+   PRIORITY_LABEL="$(jq -r ".labels.priority.\"$PRIORITY\"" "$TRACKER_CFG")"
+   SECTION_LABEL="$(jq -r ".labels.sections.\"$SECTION_LETTER\"" "$TRACKER_CFG")"
+   TASK_ISSUE_URL=$(gh issue create --repo "$TRACKER_REPO" \
      --title "[PREFIX-NNN] Task Title" \
      --body "$(cat <<'EOF'
    **Code:** PREFIX-NNN | **Priority:** HIGH/MEDIUM/LOW | **Section:** SECTION_NAME | **Dependencies:** DEPS
@@ -260,30 +280,35 @@ This cleanly removes the idea block and handles whitespace cleanup automatically
    EOF
    )" \
      --label "claude-code,task,$PRIORITY_LABEL,status:todo,$SECTION_LABEL")
+   # GitLab: glab issue create -R "$TRACKER_REPO" --title "[PREFIX-NNN] Task Title" --description "BODY" -l "claude-code,task,$PRIORITY_LABEL,status:todo,$SECTION_LABEL"
    ```
 
 3. **Cross-reference** between the idea and task issues:
    ```bash
    TASK_ISSUE_NUM=$(echo "$TASK_ISSUE_URL" | grep -oE '[0-9]+$')
-   gh issue comment "$IDEA_ISSUE" --repo "$GH_REPO" --body "Task issue: #$TASK_ISSUE_NUM" 2>/dev/null || true
+   gh issue comment "$IDEA_ISSUE" --repo "$TRACKER_REPO" --body "Task issue: #$TASK_ISSUE_NUM" 2>/dev/null || true
+   # GitLab: glab issue note "$IDEA_ISSUE" -R "$TRACKER_REPO" -m "Task issue: #$TASK_ISSUE_NUM"
    ```
 
 **Dual sync mode** — sync after local operations:
 
 1. **Close the idea issue:**
    ```bash
-   IDEA_ISSUE=$(gh issue list --repo "$GH_REPO" --search "[IDEA-NNN] in:title" --label idea --state open --json number --jq '.[0].number' 2>/dev/null)
+   IDEA_ISSUE=$(gh issue list --repo "$TRACKER_REPO" --search "[IDEA-NNN] in:title" --label idea --state open --json number --jq '.[0].number' 2>/dev/null)
+   # GitLab: IDEA_ISSUE=$(glab issue list -R "$TRACKER_REPO" --search "[IDEA-NNN]" -l idea --output json | jq '.[0].iid')
    ```
    If found:
    ```bash
-   gh issue close "$IDEA_ISSUE" --repo "$GH_REPO" --comment "Approved and promoted to task [PREFIX-NNN]." 2>/dev/null || true
+   gh issue close "$IDEA_ISSUE" --repo "$TRACKER_REPO" --comment "Approved and promoted to task [PREFIX-NNN]." 2>/dev/null || true
+   # GitLab: glab issue close "$IDEA_ISSUE" -R "$TRACKER_REPO"
+   # GitLab: glab issue note "$IDEA_ISSUE" -R "$TRACKER_REPO" -m "Approved and promoted to task [PREFIX-NNN]."
    ```
 
 2. **Create the task issue:**
    ```bash
-   PRIORITY_LABEL="$(jq -r ".labels.priority.\"$PRIORITY\"" .claude/github-issues.json)"
-   SECTION_LABEL="$(jq -r ".labels.sections.\"$SECTION_LETTER\"" .claude/github-issues.json)"
-   TASK_ISSUE_URL=$(gh issue create --repo "$GH_REPO" \
+   PRIORITY_LABEL="$(jq -r ".labels.priority.\"$PRIORITY\"" "$TRACKER_CFG")"
+   SECTION_LABEL="$(jq -r ".labels.sections.\"$SECTION_LETTER\"" "$TRACKER_CFG")"
+   TASK_ISSUE_URL=$(gh issue create --repo "$TRACKER_REPO" \
      --title "[PREFIX-NNN] Task Title" \
      --body "$(cat <<'EOF'
    **Code:** PREFIX-NNN | **Priority:** PRIORITY | **Section:** SECTION_NAME | **Dependencies:** DEPS
@@ -304,6 +329,7 @@ This cleanly removes the idea block and handles whitespace cleanup automatically
    EOF
    )" \
      --label "claude-code,task,$PRIORITY_LABEL,status:todo,$SECTION_LABEL")
+   # GitLab: glab issue create -R "$TRACKER_REPO" --title "[PREFIX-NNN] Task Title" --description "BODY" -l "claude-code,task,$PRIORITY_LABEL,status:todo,$SECTION_LABEL"
    ```
 
 3. Extract the task issue number and write `GitHub: #NNN` to the new task block in `to-do.txt`.
@@ -311,12 +337,13 @@ This cleanly removes the idea block and handles whitespace cleanup automatically
 4. **Cross-reference** between the idea and task issues:
    ```bash
    TASK_ISSUE_NUM=$(echo "$TASK_ISSUE_URL" | grep -oE '[0-9]+$')
-   gh issue comment "$IDEA_ISSUE" --repo "$GH_REPO" --body "Task issue: #$TASK_ISSUE_NUM" 2>/dev/null || true
+   gh issue comment "$IDEA_ISSUE" --repo "$TRACKER_REPO" --body "Task issue: #$TASK_ISSUE_NUM" 2>/dev/null || true
+   # GitLab: glab issue note "$IDEA_ISSUE" -R "$TRACKER_REPO" -m "Task issue: #$TASK_ISSUE_NUM"
    ```
 
 **Local only mode:** Skip this step entirely.
 
-**If any `gh` command fails:** Warn but do NOT fail — in dual sync mode the local operations are already complete. In GitHub-only mode, report the failure clearly since no local fallback exists.
+**If any `gh`/`glab` command fails:** Warn but do NOT fail — in dual sync mode the local operations are already complete. In platform-only mode, report the failure clearly since no local fallback exists.
 
 ### Step 10: Confirm and Report
 
@@ -333,9 +360,9 @@ After successfully completing all operations, report:
 >
 > *(mode-specific details below)*
 
-**GitHub-only mode:** "The idea issue has been closed and the task issue has been created on GitHub. Pick it up with `/task-pick PREFIX-NNN`."
+**Platform-only mode:** "The idea issue has been closed and the task issue has been created on the platform. Pick it up with `/task-pick PREFIX-NNN`."
 
-**Dual sync mode:** "The idea has been removed from `ideas.txt`. The task is now in `to-do.txt` and synced to GitHub. Pick it up with `/task-pick PREFIX-NNN`."
+**Dual sync mode:** "The idea has been removed from `ideas.txt`. The task is now in `to-do.txt` and synced to the platform. Pick it up with `/task-pick PREFIX-NNN`."
 
 **Local only mode:** "The idea has been removed from `ideas.txt`. The task is now in `to-do.txt` and can be picked up with `/task-pick PREFIX-NNN`."
 
@@ -349,8 +376,8 @@ Sections are defined in `to-do.txt`. Read the section headers to understand the 
 2. **In local/dual mode, NEVER modify `progressing.txt` or `done.txt`** — only add to `to-do.txt` and remove from `ideas.txt`.
 3. **NEVER reuse a task number** — always use global max + 1.
 4. **NEVER skip user confirmation** — always present the draft and wait for approval.
-5. **English content** — all task block content and GitHub issue content in English across all modes.
+5. **English content** — all task block content and platform issue content in English across all modes.
 6. **Accurate file paths** — verify with `Glob` before listing.
 7. **Follow the exact task formatting** — in local/dual mode use same indentation, dash count (78), field order as existing tasks.
-8. **Always remove the approved idea from its source** — in local/dual mode remove from `ideas.txt`; in GitHub-only mode close the idea issue. An approved idea must not remain in the backlog.
-9. **GitHub-only mode has no local files** — never read or write `ideas.txt`, `to-do.txt`, `progressing.txt`, or `done.txt` when in GitHub-only mode.
+8. **Always remove the approved idea from its source** — in local/dual mode remove from `ideas.txt`; in platform-only mode close the idea issue. An approved idea must not remain in the backlog.
+9. **Platform-only mode has no local files** — never read or write `ideas.txt`, `to-do.txt`, `progressing.txt`, or `done.txt` when in platform-only mode.

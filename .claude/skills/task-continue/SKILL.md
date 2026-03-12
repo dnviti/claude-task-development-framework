@@ -16,22 +16,33 @@ This skill does NOT close or commit tasks — use `/task-pick` for that.
 Determine the operating mode first:
 
 ```bash
-GH_ENABLED="$(jq -r '.enabled // false' .claude/github-issues.json 2>/dev/null)"
-GH_SYNC="$(jq -r '.sync // false' .claude/github-issues.json 2>/dev/null)"
-GH_REPO="$(jq -r '.repo' .claude/github-issues.json 2>/dev/null)"
+TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
+PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
 ```
 
-- **GitHub-only mode** (`GH_ENABLED=true` AND `GH_SYNC != true`): Read task data from GitHub Issues. No local file operations.
+- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Read task data from GitHub Issues. No local file operations.
 - **Dual sync / Local only mode**: Read task data from local files (`progressing.txt`).
+
+## Platform Commands
+
+| Operation | GitHub | GitLab |
+|-----------|--------|--------|
+| List issues (JSON) | `gh issue list --repo "$TRACKER_REPO" --label L --state open --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --state opened --output json \| jq 'e'` |
+| Search issues | `gh issue list --repo "$TRACKER_REPO" --search "term in:title" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
+| View issue | `gh issue view N --repo "$TRACKER_REPO" --json body --jq '.body'` | `glab issue view N -R "$TRACKER_REPO" --output json \| jq '.body'` |
 
 ---
 
 ## Current Task State
 
-### GitHub-only mode — In-progress tasks:
+### Platform-only mode — In-progress tasks:
 
 ```bash
-gh issue list --repo "$GH_REPO" --label "task,status:in-progress" --state open --json number,title --jq '.[] | "\(.title)"' 2>/dev/null
+gh issue list --repo "$TRACKER_REPO" --label "task,status:in-progress" --state open --json number,title --jq '.[] | "\(.title)"' 2>/dev/null
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:in-progress" --state opened --output json | jq '.[] | "\(.title)"' 2>/dev/null
 ```
 
 ### Local/Dual mode — In-progress tasks:
@@ -45,9 +56,11 @@ The user wants to continue working on a task. The argument provided is: **$ARGUM
 
 ### Step 1: Select the Task
 
-**In GitHub-only mode:**
-- Query in-progress tasks: `gh issue list --repo "$GH_REPO" --label "task,status:in-progress" --state open --json number,title`
-- If a task code was provided, search: `gh issue list --repo "$GH_REPO" --search "[TASK-CODE] in:title" --label "task,status:in-progress" --json number,title`
+**In Platform-only mode:**
+- Query in-progress tasks: `gh issue list --repo "$TRACKER_REPO" --label "task,status:in-progress" --state open --json number,title`
+  <!-- GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:in-progress" --state opened --output json -->
+- If a task code was provided, search: `gh issue list --repo "$TRACKER_REPO" --search "[TASK-CODE] in:title" --label "task,status:in-progress" --json number,title`
+  <!-- GitLab: glab issue list -R "$TRACKER_REPO" --search "[TASK-CODE]" -l "task,status:in-progress" --output json -->
 
 **In local/dual mode:**
 - Read `progressing.txt` and identify all tasks marked `[~]`.
@@ -71,9 +84,11 @@ git branch --list "task/<task-code-lowercase>"
 
 ### Step 2: Read the Full Task Block
 
-**In GitHub-only mode:**
-- Find the issue number: `gh issue list --repo "$GH_REPO" --search "[TASK-CODE] in:title" --label task --json number --jq '.[0].number'`
-- Read the full issue body: `gh issue view $ISSUE_NUM --repo "$GH_REPO" --json body --jq '.body'`
+**In Platform-only mode:**
+- Find the issue number: `gh issue list --repo "$TRACKER_REPO" --search "[TASK-CODE] in:title" --label task --json number --jq '.[0].number'`
+  <!-- GitLab: glab issue list -R "$TRACKER_REPO" --search "[TASK-CODE]" -l task --output json | jq '.[0].iid' -->
+- Read the full issue body: `gh issue view $ISSUE_NUM --repo "$TRACKER_REPO" --json body --jq '.body'`
+  <!-- GitLab: glab issue view $ISSUE_NUM -R "$TRACKER_REPO" --output json | jq '.body' -->
 - Parse the issue body to extract:
   - **Description** section
   - **Technical Details** section

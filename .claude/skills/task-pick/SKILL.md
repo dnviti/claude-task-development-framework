@@ -16,28 +16,46 @@ You are a task manager for this project. Your job is to:
 Determine the operating mode first:
 
 ```bash
-GH_ENABLED="$(jq -r '.enabled // false' .claude/github-issues.json 2>/dev/null)"
-GH_SYNC="$(jq -r '.sync // false' .claude/github-issues.json 2>/dev/null)"
-GH_REPO="$(jq -r '.repo' .claude/github-issues.json 2>/dev/null)"
+TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
+PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
 ```
 
-- **GitHub-only mode** (`GH_ENABLED=true` AND `GH_SYNC != true`): Read/write task state via GitHub Issues. No local file operations.
-- **Dual sync mode** (`GH_ENABLED=true` AND `GH_SYNC=true`): Use local files as primary, then sync to GitHub.
-- **Local only mode** (`GH_ENABLED=false` or config missing): Use local files only.
+- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Read/write task state via GitHub Issues. No local file operations.
+- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Use local files as primary, then sync to GitHub.
+- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Use local files only.
+
+## Platform Commands
+
+| Operation | GitHub | GitLab |
+|-----------|--------|--------|
+| List issues | `gh issue list --repo "$TRACKER_REPO" --label L --state open --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --state opened --output json \| jq 'e'` |
+| Search issues | `gh issue list --repo "$TRACKER_REPO" --search "term in:title" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
+| View issue | `gh issue view N --repo "$TRACKER_REPO" --json body --jq '.body'` | `glab issue view N -R "$TRACKER_REPO" --output json \| jq '.description'` |
+| Edit labels | `gh issue edit N --repo "$TRACKER_REPO" --add-label L --remove-label L` | `glab issue update N -R "$TRACKER_REPO" --label L --unlabel L` |
+| Close issue | `gh issue close N --repo "$TRACKER_REPO" --comment "msg"` | `glab issue close N -R "$TRACKER_REPO"` then `glab issue note N -R "$TRACKER_REPO" -m "msg"` |
+| Comment | `gh issue comment N --repo "$TRACKER_REPO" --body "msg"` | `glab issue note N -R "$TRACKER_REPO" -m "msg"` |
 
 ## Current Task State
 
-### GitHub-only mode:
+### Platform-only mode:
 
 ```bash
 # In-progress tasks
-gh issue list --repo "$GH_REPO" --label "task,status:in-progress" --state open --json number,title --jq '.[] | "\(.title)"' 2>/dev/null
+gh issue list --repo "$TRACKER_REPO" --label "task,status:in-progress" --state open --json number,title --jq '.[] | "\(.title)"' 2>/dev/null
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:in-progress" --state opened --output json | jq '.[].title'
 # Pending tasks (by priority)
-gh issue list --repo "$GH_REPO" --label "task,status:todo,priority:high" --state open --json number,title --jq '.[] | "\(.title)"' 2>/dev/null
-gh issue list --repo "$GH_REPO" --label "task,status:todo,priority:medium" --state open --json number,title --jq '.[] | "\(.title)"' 2>/dev/null
-gh issue list --repo "$GH_REPO" --label "task,status:todo,priority:low" --state open --json number,title --jq '.[] | "\(.title)"' 2>/dev/null
+gh issue list --repo "$TRACKER_REPO" --label "task,status:todo,priority:high" --state open --json number,title --jq '.[] | "\(.title)"' 2>/dev/null
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:todo,priority:high" --state opened --output json | jq '.[].title'
+gh issue list --repo "$TRACKER_REPO" --label "task,status:todo,priority:medium" --state open --json number,title --jq '.[] | "\(.title)"' 2>/dev/null
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:todo,priority:medium" --state opened --output json | jq '.[].title'
+gh issue list --repo "$TRACKER_REPO" --label "task,status:todo,priority:low" --state open --json number,title --jq '.[] | "\(.title)"' 2>/dev/null
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:todo,priority:low" --state opened --output json | jq '.[].title'
 # Completed tasks
-gh issue list --repo "$GH_REPO" --label "task,status:done" --state closed --limit 20 --json number,title --jq '.[] | "\(.title)"' 2>/dev/null
+gh issue list --repo "$TRACKER_REPO" --label "task,status:done" --state closed --limit 20 --json number,title --jq '.[] | "\(.title)"' 2>/dev/null
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:done" --state closed --output json | jq '.[].title'
 ```
 
 ### Local/Dual mode:
@@ -64,8 +82,9 @@ The user wants to pick up a task. The argument provided is: **$ARGUMENTS**
 
 Before picking any new task, you MUST process in-progress tasks.
 
-**In GitHub-only mode:**
-- Query in-progress tasks: `gh issue list --repo "$GH_REPO" --label "task,status:in-progress" --state open --json number,title`
+**In platform-only mode:**
+- Query in-progress tasks: `gh issue list --repo "$TRACKER_REPO" --label "task,status:in-progress" --state open --json number,title`
+  <!-- GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:in-progress" --state opened --output json | jq '...' -->
 - If a specific task code was provided AND that task has `status:in-progress` label: jump directly to Step 0b for that task only.
 - Otherwise, process ALL in-progress tasks sequentially.
 
@@ -90,9 +109,11 @@ git branch --list "task/<task-code-lowercase>"
 
 **Read the full task details:**
 
-**In GitHub-only mode:**
-- Find the issue: `ISSUE_NUM=$(gh issue list --repo "$GH_REPO" --search "[TASK-CODE] in:title" --label task --state open --json number --jq '.[0].number')`
-- Read the body: `gh issue view $ISSUE_NUM --repo "$GH_REPO" --json body --jq '.body'`
+**In platform-only mode:**
+- Find the issue: `ISSUE_NUM=$(gh issue list --repo "$TRACKER_REPO" --search "[TASK-CODE] in:title" --label task --state open --json number --jq '.[0].number')`
+  <!-- GitLab: glab issue list -R "$TRACKER_REPO" --search "[TASK-CODE]" -l task --state opened --output json | jq '.[0].iid' -->
+- Read the body: `gh issue view $ISSUE_NUM --repo "$TRACKER_REPO" --json body --jq '.body'`
+  <!-- GitLab: glab issue view $ISSUE_NUM -R "$TRACKER_REPO" --output json | jq '.description' -->
 - Parse the body to extract **Files Involved** (CREATE / MODIFY) and **Technical Details** sections.
 
 **In local/dual mode:**
@@ -184,9 +205,11 @@ Inform the user how many tasks were closed, then continue to Step 1 to pick a ne
 
 This step is only reached when there are NO in-progress tasks remaining.
 
-**In GitHub-only mode:**
-- **If a task code was provided** (e.g., `AUTH-001`): Search for it: `gh issue list --repo "$GH_REPO" --search "[TASK-CODE] in:title" --label "task,status:todo" --state open --json number,title`
-  - If not found in todo, check if already done: `gh issue list --repo "$GH_REPO" --search "[TASK-CODE] in:title" --label "task,status:done" --state closed --json number,title`
+**In platform-only mode:**
+- **If a task code was provided** (e.g., `AUTH-001`): Search for it: `gh issue list --repo "$TRACKER_REPO" --search "[TASK-CODE] in:title" --label "task,status:todo" --state open --json number,title`
+  <!-- GitLab: glab issue list -R "$TRACKER_REPO" --search "[TASK-CODE]" -l "task,status:todo" --state opened --output json -->
+  - If not found in todo, check if already done: `gh issue list --repo "$TRACKER_REPO" --search "[TASK-CODE] in:title" --label "task,status:done" --state closed --json number,title`
+    <!-- GitLab: glab issue list -R "$TRACKER_REPO" --search "[TASK-CODE]" -l "task,status:done" --state closed --output json -->
   - If done, inform the user and suggest the next available task.
 - **If no argument was provided**: Select the next task by priority label ordering: `priority:high` first, then `priority:medium`, then `priority:low`. Within same priority, pick the lowest-numbered task. Check dependencies by reading the task body — dependency task codes should have `status:done` label.
 
@@ -196,13 +219,16 @@ This step is only reached when there are NO in-progress tasks remaining.
 
 ### Step 2: Mark task as in-progress
 
-**In GitHub-only mode:**
+**In platform-only mode:**
 
 Update the GitHub Issue labels:
 ```bash
-ISSUE_NUM=$(gh issue list --repo "$GH_REPO" --search "[TASK-CODE] in:title" --label "task,status:todo" --state open --json number --jq '.[0].number')
-gh issue edit "$ISSUE_NUM" --repo "$GH_REPO" --remove-label "status:todo" --add-label "status:in-progress"
-gh issue comment "$ISSUE_NUM" --repo "$GH_REPO" --body "Task picked up. Branch: \`task/<task-code-lowercase>\`"
+ISSUE_NUM=$(gh issue list --repo "$TRACKER_REPO" --search "[TASK-CODE] in:title" --label "task,status:todo" --state open --json number --jq '.[0].number')
+# GitLab: glab issue list -R "$TRACKER_REPO" --search "[TASK-CODE]" -l task --state opened --output json | jq '.[0].iid'
+gh issue edit "$ISSUE_NUM" --repo "$TRACKER_REPO" --remove-label "status:todo" --add-label "status:in-progress"
+# GitLab: glab issue update "$ISSUE_NUM" -R "$TRACKER_REPO" --unlabel "status:todo" --label "status:in-progress"
+gh issue comment "$ISSUE_NUM" --repo "$TRACKER_REPO" --body "Task picked up. Branch: \`task/<task-code-lowercase>\`"
+# GitLab: glab issue note "$ISSUE_NUM" -R "$TRACKER_REPO" -m "Task picked up. Branch: \`task/<task-code-lowercase>\`"
 ```
 
 **In dual sync mode:**
@@ -244,8 +270,9 @@ git branch --list "task/<task-code-lowercase>"
 
 ### Step 3: Read the full task details
 
-**In GitHub-only mode:**
-- `gh issue view $ISSUE_NUM --repo "$GH_REPO" --json body --jq '.body'`
+**In platform-only mode:**
+- `gh issue view $ISSUE_NUM --repo "$TRACKER_REPO" --json body --jq '.body'`
+  <!-- GitLab: glab issue view $ISSUE_NUM -R "$TRACKER_REPO" --output json | jq '.description' -->
 - Parse the structured body: DESCRIPTION, TECHNICAL DETAILS, Files involved (CREATE / MODIFY) sections.
 
 **In local/dual mode:**
@@ -326,11 +353,15 @@ Use `AskUserQuestion` with options:
 
 Once the user confirms the work is done:
 
-**In GitHub-only mode:**
+**In platform-only mode:**
 ```bash
-ISSUE_NUM=$(gh issue list --repo "$GH_REPO" --search "[TASK-CODE] in:title" --label task --state open --json number --jq '.[0].number')
-gh issue edit "$ISSUE_NUM" --repo "$GH_REPO" --remove-label "status:in-progress" --add-label "status:done"
-gh issue close "$ISSUE_NUM" --repo "$GH_REPO" --comment "Task completed and verified. Quality gate passed."
+ISSUE_NUM=$(gh issue list --repo "$TRACKER_REPO" --search "[TASK-CODE] in:title" --label task --state open --json number --jq '.[0].number')
+# GitLab: glab issue list -R "$TRACKER_REPO" --search "[TASK-CODE]" -l task --state opened --output json | jq '.[0].iid'
+gh issue edit "$ISSUE_NUM" --repo "$TRACKER_REPO" --remove-label "status:in-progress" --add-label "status:done"
+# GitLab: glab issue update "$ISSUE_NUM" -R "$TRACKER_REPO" --unlabel "status:in-progress" --label "status:done"
+gh issue close "$ISSUE_NUM" --repo "$TRACKER_REPO" --comment "Task completed and verified. Quality gate passed."
+# GitLab: glab issue close "$ISSUE_NUM" -R "$TRACKER_REPO"
+# GitLab: glab issue note "$ISSUE_NUM" -R "$TRACKER_REPO" -m "Task completed and verified. Quality gate passed."
 ```
 
 **In dual sync mode:**

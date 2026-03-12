@@ -69,15 +69,17 @@ Use `/idea-create` to add ideas, `/idea-approve` to promote an idea to a task, `
 
 ### Task & Idea Management Modes
 
-Tasks and ideas support three operating modes, controlled by `.claude/github-issues.json`:
+Tasks and ideas support three operating modes, controlled by `.claude/issues-tracker.json` (or legacy `.claude/github-issues.json`):
 
 | `enabled` | `sync` | Mode | Data Source |
 |-----------|--------|------|-------------|
-| `true` | `false` (or absent) | **GitHub-only** | GitHub Issues only. No local files. |
-| `true` | `true` | **Dual sync** | Local files first, then GitHub Issues. |
+| `true` | `false` (or absent) | **Platform-only** | GitHub Issues or GitLab Issues only. No local files. |
+| `true` | `true` | **Dual sync** | Local files first, then platform issues. |
 | `false` | — | **Local only** | Local text files only (default). |
 
-**Setup:** Copy `.claude/github-issues.example.json` to `.claude/github-issues.json`, configure the `repo` field, and run `bash scripts/setup-github-labels.sh` to create the required labels. Or use `/project-initialization` which offers this setup interactively.
+The `platform` field (`"github"` or `"gitlab"`) determines which CLI tool (`gh` or `glab`) is used. If omitted, defaults to `"github"`.
+
+**Setup:** Copy `.claude/issues-tracker.example.json` to `.claude/issues-tracker.json`, set the `platform` and `repo` fields, and run `bash scripts/setup-labels.sh` to create the required labels. Or use `/project-initialization` which offers this setup interactively. Legacy `.claude/github-issues.json` is still supported as a fallback.
 
 ## Cross-Platform Notes
 

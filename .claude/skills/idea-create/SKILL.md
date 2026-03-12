@@ -1,6 +1,6 @@
 ---
 name: idea-create
-description: Create a new idea in the idea backlog (ideas.txt or GitHub Issues) for future evaluation. Ideas are lightweight proposals that must be approved before becoming tasks.
+description: Create a new idea in the idea backlog (ideas.txt or platform issues) for future evaluation. Ideas are lightweight proposals that must be approved before becoming tasks.
 disable-model-invocation: true
 argument-hint: "[idea description]"
 ---
@@ -18,21 +18,32 @@ Always respond and work in English. The idea block content (field labels, descri
 Determine the operating mode first:
 
 ```bash
-GH_ENABLED="$(jq -r '.enabled // false' .claude/github-issues.json 2>/dev/null)"
-GH_SYNC="$(jq -r '.sync // false' .claude/github-issues.json 2>/dev/null)"
-GH_REPO="$(jq -r '.repo' .claude/github-issues.json 2>/dev/null)"
+TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
+PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
 ```
 
-- **GitHub-only mode** (`GH_ENABLED=true` AND `GH_SYNC != true`): Create ideas as GitHub Issues only. No local file operations.
-- **Dual sync mode** (`GH_ENABLED=true` AND `GH_SYNC=true`): Write to `ideas.txt` first, then sync to GitHub.
-- **Local only mode** (`GH_ENABLED=false` or config missing): Write to `ideas.txt` only.
+- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Create ideas as platform issues only. No local file operations.
+- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Write to `ideas.txt` first, then sync to platform issues.
+- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Write to `ideas.txt` only.
+
+## Platform Commands
+
+| Operation | GitHub | GitLab |
+|-----------|--------|--------|
+| List issues (JSON) | `gh issue list --repo "$TRACKER_REPO" --label L --state all --json title --jq '...'` | `glab issue list -R "$TRACKER_REPO" -l L --state all --output json \| jq '...'` |
+| Create issue | `gh issue create --repo "$TRACKER_REPO" --title T --body B --label L` | `glab issue create -R "$TRACKER_REPO" --title T --description B -l L` |
+| Search issues | `gh issue list --repo "$TRACKER_REPO" --search "term" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
 
 ## Current Idea State
 
-### GitHub-only mode — existing idea IDs:
+### Platform-only mode — existing idea IDs:
 
 ```bash
-gh issue list --repo "$GH_REPO" --label idea --state all --limit 500 --json title --jq '.[].title' 2>/dev/null | grep -oE 'IDEA-[0-9]{3}' | sort -t'-' -k2 -n | tail -10
+gh issue list --repo "$TRACKER_REPO" --label idea --state all --limit 500 --json title --jq '.[].title' 2>/dev/null | grep -oE 'IDEA-[0-9]{3}' | sort -t'-' -k2 -n | tail -10
+# GitLab: glab issue list -R "$TRACKER_REPO" -l idea --state all --output json | jq '.[].title' | grep -oE 'IDEA-[0-9]{3}' | sort -t'-' -k2 -n | tail -10
 ```
 
 ### Local/Dual mode:
@@ -73,8 +84,9 @@ If no existing category fits well, create a concise new one.
 
 Idea numbering is **globally sequential**.
 
-**In GitHub-only mode:**
-1. Query all idea IDs: `gh issue list --repo "$GH_REPO" --label idea --state all --limit 500 --json title --jq '.[].title' | grep -oE 'IDEA-[0-9]{3}' | sort -t'-' -k2 -n | tail -5`
+**In Platform-only mode:**
+1. Query all idea IDs: `gh issue list --repo "$TRACKER_REPO" --label idea --state all --limit 500 --json title --jq '.[].title' | grep -oE 'IDEA-[0-9]{3}' | sort -t'-' -k2 -n | tail -5`
+   <!-- GitLab: glab issue list -R "$TRACKER_REPO" -l idea --state all --output json | jq '.[].title' | grep -oE 'IDEA-[0-9]{3}' | sort -t'-' -k2 -n | tail -5 -->
 2. Find the maximum number.
 3. The new idea number = `max + 1`, zero-padded to 3 digits.
 4. If no ideas exist yet, start at `IDEA-001`.
@@ -84,7 +96,7 @@ Use the `next_number` field from the "Next available idea ID" JSON above. No man
 
 ### Step 4: Draft the Idea
 
-**In GitHub-only mode**, draft the idea as a GitHub Issue:
+**In Platform-only mode**, draft the idea as a platform issue:
 
 **Title:** `[IDEA-NNN] Idea Title (concise)`
 
@@ -148,10 +160,12 @@ Then use `AskUserQuestion` with these options:
 
 Before writing, perform a duplicate check:
 
-**In GitHub-only mode:**
+**In Platform-only mode:**
 ```bash
-gh issue list --repo "$GH_REPO" --search "keyword1" --label idea --json number,title --jq '.[] | "#\(.number) \(.title)"'
-gh issue list --repo "$GH_REPO" --search "keyword2" --label task --json number,title --jq '.[] | "#\(.number) \(.title)"'
+gh issue list --repo "$TRACKER_REPO" --search "keyword1" --label idea --json number,title --jq '.[] | "#\(.number) \(.title)"'
+# GitLab: glab issue list -R "$TRACKER_REPO" --search "keyword1" -l idea --output json | jq '.[] | "#\(.iid) \(.title)"'
+gh issue list --repo "$TRACKER_REPO" --search "keyword2" --label task --json number,title --jq '.[] | "#\(.number) \(.title)"'
+# GitLab: glab issue list -R "$TRACKER_REPO" --search "keyword2" -l task --output json | jq '.[] | "#\(.iid) \(.title)"'
 ```
 
 **In local/dual mode:**
@@ -162,23 +176,24 @@ gh issue list --repo "$GH_REPO" --search "keyword2" --label task --json number,t
 
 ### Step 7: Create the Idea
 
-**In GitHub-only mode:**
+**In Platform-only mode:**
 
-Create the GitHub Issue directly:
+Create the platform issue directly:
 ```bash
-ISSUE_URL=$(gh issue create --repo "$GH_REPO" \
+ISSUE_URL=$(gh issue create --repo "$TRACKER_REPO" \
   --title "[IDEA-NNN] Idea Title" \
   --body "$IDEA_BODY" \
   --label "claude-code,idea")
+# GitLab: glab issue create -R "$TRACKER_REPO" --title "[IDEA-NNN] Idea Title" --description "$IDEA_BODY" -l "claude-code,idea"
 ```
 
 **In dual sync mode:**
 
 1. Append the idea block to `ideas.txt` using the `Edit` tool.
-2. Then create the GitHub Issue (same as above).
+2. Then create the platform issue (same as above).
 3. Extract the issue number: `ISSUE_NUM=$(echo "$ISSUE_URL" | grep -oE '[0-9]+$')`
 4. Write `GitHub: #NNN` back to the idea block in `ideas.txt` after the `Date:` line using the `Edit` tool.
-5. If the `gh` command fails, warn the user that GitHub sync failed but do NOT fail the idea creation — the idea is already in `ideas.txt`.
+5. If the platform command fails, warn the user that platform sync failed but do NOT fail the idea creation — the idea is already in `ideas.txt`.
 
 **In local only mode:**
 
@@ -206,4 +221,4 @@ After successfully creating the idea, report:
 5. **English content** — all labels, descriptions, and content in English across all modes.
 6. **Keep ideas high-level** — no implementation details, no file lists, no technical specifications. Those are added during `/idea-approve`.
 7. **Follow the exact formatting** — same indentation, same dash count (78), same field order for local mode.
-8. **In GitHub-only mode, NEVER modify local idea files** — all operations go through GitHub Issues exclusively.
+8. **In Platform-only mode, NEVER modify local idea files** — all operations go through platform issues exclusively.

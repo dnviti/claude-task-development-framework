@@ -1,6 +1,6 @@
 ---
 name: idea-disapprove
-description: Disapprove an idea by moving it from ideas.txt to idea-disapproved.txt (local mode) or closing the GitHub Issue with a rejection reason (GitHub-only mode).
+description: Disapprove an idea by moving it from ideas.txt to idea-disapproved.txt (local mode) or closing the GitHub/GitLab Issue with a rejection reason (Platform-only mode).
 disable-model-invocation: true
 argument-hint: "[IDEA-NNN]"
 ---
@@ -16,21 +16,33 @@ Always respond and work in English.
 Determine the operating mode first:
 
 ```bash
-GH_ENABLED="$(jq -r '.enabled // false' .claude/github-issues.json 2>/dev/null)"
-GH_SYNC="$(jq -r '.sync // false' .claude/github-issues.json 2>/dev/null)"
-GH_REPO="$(jq -r '.repo' .claude/github-issues.json 2>/dev/null)"
+TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
+PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
 ```
 
-- **GitHub-only mode** (`GH_ENABLED=true` AND `GH_SYNC != true`): Close the GitHub Issue with rejection reason. No local file operations.
-- **Dual sync mode** (`GH_ENABLED=true` AND `GH_SYNC=true`): Move idea in local files, then close GitHub Issue.
-- **Local only mode** (`GH_ENABLED=false` or config missing): Move idea from `ideas.txt` to `idea-disapproved.txt`.
+- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Close the GitHub/GitLab Issue with rejection reason. No local file operations.
+- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Move idea in local files, then close GitHub/GitLab Issue.
+- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Move idea from `ideas.txt` to `idea-disapproved.txt`.
+
+## Platform Commands
+
+| Operation | GitHub | GitLab |
+|-----------|--------|--------|
+| List issues | `gh issue list --repo "$TRACKER_REPO" --label L --state open --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --state opened --output json \| jq 'e'` |
+| Search issues | `gh issue list --repo "$TRACKER_REPO" --search "term in:title" --label L --json f` | `glab issue list -R "$TRACKER_REPO" --search "term" -l L --output json` |
+| View issue | `gh issue view N --repo "$TRACKER_REPO" --json title,body` | `glab issue view N -R "$TRACKER_REPO" --output json \| jq '{title,description}'` |
+| Close issue | `gh issue close N --repo "$TRACKER_REPO" --reason "not planned" --comment "msg"` | `glab issue close N -R "$TRACKER_REPO"` then `glab issue note N -R "$TRACKER_REPO" -m "msg"` |
 
 ## Current State
 
-### GitHub-only mode — ideas available:
+### Platform-only mode — ideas available:
 
 ```bash
-gh issue list --repo "$GH_REPO" --label "idea" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null
+gh issue list --repo "$TRACKER_REPO" --label "idea" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "idea" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"' 2>/dev/null
 ```
 
 ### Local/Dual mode — ideas available for disapproval:
@@ -47,8 +59,8 @@ The user wants to disapprove: **$ARGUMENTS**
 
 ### Step 1: Select the Idea
 
-**In GitHub-only mode:**
-- If an IDEA-NNN code was provided: `gh issue list --repo "$GH_REPO" --search "[IDEA-NNN] in:title" --label idea --state open --json number,title,body`
+**In Platform-only mode:**
+- If an IDEA-NNN code was provided: `gh issue list --repo "$TRACKER_REPO" --search "[IDEA-NNN] in:title" --label idea --state open --json number,title,body` (GitLab: `glab issue list -R "$TRACKER_REPO" --search "[IDEA-NNN]" -l idea --state opened --output json`)
 - If no argument: list all open ideas from GitHub and use `AskUserQuestion` to ask which to disapprove.
 
 **In local/dual mode:**
@@ -59,8 +71,8 @@ If no ideas are available, inform the user: "No ideas available for disapproval.
 
 ### Step 2: Show the Full Idea
 
-**In GitHub-only mode:**
-- Read the issue body: `gh issue view $ISSUE_NUM --repo "$GH_REPO" --json title,body`
+**In Platform-only mode:**
+- Read the issue body: `gh issue view $ISSUE_NUM --repo "$TRACKER_REPO" --json title,body` (GitLab: `glab issue view $ISSUE_NUM -R "$TRACKER_REPO" --output json | jq '{title,description}'`)
 
 **In local/dual mode:**
 Get the full parsed idea data:
@@ -96,12 +108,15 @@ Options:
 
 ### Step 5: Execute the Disapproval
 
-**In GitHub-only mode:**
+**In Platform-only mode:**
 
-Close the GitHub Issue with the rejection reason:
+Close the GitHub/GitLab Issue with the rejection reason:
 ```bash
-IDEA_ISSUE=$(gh issue list --repo "$GH_REPO" --search "[IDEA-NNN] in:title" --label idea --state open --json number --jq '.[0].number' 2>/dev/null)
-gh issue close "$IDEA_ISSUE" --repo "$GH_REPO" --reason "not planned" --comment "Idea disapproved. Reason: $REASON" 2>/dev/null || true
+IDEA_ISSUE=$(gh issue list --repo "$TRACKER_REPO" --search "[IDEA-NNN] in:title" --label idea --state open --json number --jq '.[0].number' 2>/dev/null)
+# GitLab: IDEA_ISSUE=$(glab issue list -R "$TRACKER_REPO" --search "[IDEA-NNN]" -l idea --state opened --output json | jq '.[0].iid' 2>/dev/null)
+gh issue close "$IDEA_ISSUE" --repo "$TRACKER_REPO" --reason "not planned" --comment "Idea disapproved. Reason: $REASON" 2>/dev/null || true
+# GitLab: glab issue close "$IDEA_ISSUE" -R "$TRACKER_REPO" 2>/dev/null || true
+# GitLab: glab issue note "$IDEA_ISSUE" -R "$TRACKER_REPO" -m "Idea disapproved. Reason: $REASON" 2>/dev/null || true
 ```
 
 **In dual sync mode:**
@@ -117,11 +132,11 @@ gh issue close "$IDEA_ISSUE" --repo "$GH_REPO" --reason "not planned" --comment 
 4. **Remove the idea from `ideas.txt`:**
    Run: `python3 scripts/task_manager.py remove IDEA-NNN --file ideas.txt`
    This cleanly removes the block and handles whitespace cleanup automatically.
-5. **Close the GitHub Issue** (same as GitHub-only mode above). If `gh` command fails, warn but do NOT fail — the local operations are already complete.
+5. **Close the GitHub/GitLab Issue** (same as Platform-only mode above). If the command fails, warn but do NOT fail — the local operations are already complete.
 
 **In local only mode:**
 
-Same as dual sync steps 1-4, but skip the GitHub Issue close.
+Same as dual sync steps 1-4, but skip the GitHub/GitLab Issue close.
 
 ### Step 6: Confirm and Report
 
@@ -137,7 +152,7 @@ After successfully disapproving the idea, report:
 ## Important Rules
 
 1. **NEVER modify task files** (`to-do.txt`, `progressing.txt`, `done.txt`).
-2. **NEVER delete ideas permanently** — in local/dual mode, always archive to `idea-disapproved.txt`. In GitHub-only mode, the closed issue serves as the archive.
+2. **NEVER delete ideas permanently** — in local/dual mode, always archive to `idea-disapproved.txt`. In Platform-only mode, the closed issue serves as the archive.
 3. **NEVER skip user confirmation** — always confirm before disapproving.
 4. **English content** — the `REJECTION REASON:` field and its content must be in English.
 5. **Preserve formatting** — maintain the idea block's indentation, dash count (78), and field order when moving (local/dual mode).

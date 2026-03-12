@@ -1,6 +1,6 @@
 ---
 name: idea-refactor
-description: Review all ideas in ideas.txt or GitHub Issues against the current codebase state and update them to reflect changes in architecture, completed features, or new technical context.
+description: Review all ideas in ideas.txt or platform issues (GitHub/GitLab) against the current codebase state and update them to reflect changes in architecture, completed features, or new technical context.
 disable-model-invocation: true
 argument-hint: "[IDEA-NNN or blank for all]"
 ---
@@ -18,28 +18,43 @@ Always respond and work in English. Idea content MUST remain in **English**.
 Determine the operating mode first:
 
 ```bash
-GH_ENABLED="$(jq -r '.enabled // false' .claude/github-issues.json 2>/dev/null)"
-GH_SYNC="$(jq -r '.sync // false' .claude/github-issues.json 2>/dev/null)"
-GH_REPO="$(jq -r '.repo' .claude/github-issues.json 2>/dev/null)"
+TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
+PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
 ```
 
-- **GitHub-only mode** (`GH_ENABLED=true` AND `GH_SYNC != true`): Read/write ideas from GitHub Issues. No local file operations.
-- **Dual sync mode** (`GH_ENABLED=true` AND `GH_SYNC=true`): Read/write ideas from local files, then sync to GitHub.
-- **Local only mode** (`GH_ENABLED=false` or config missing): Read/write ideas from local files only.
+- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Read/write ideas from platform issues. No local file operations.
+- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Read/write ideas from local files, then sync to platform issues.
+- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Read/write ideas from local files only.
+
+## Platform Commands
+
+| Operation | GitHub | GitLab |
+|-----------|--------|--------|
+| List issues (JSON) | `gh issue list --repo "$TRACKER_REPO" --label L --state open --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --state opened --output json \| jq 'e'` |
+| View issue | `gh issue view N --repo "$TRACKER_REPO" --json number,title,body` | `glab issue view N -R "$TRACKER_REPO" --output json \| jq '{iid,title,description}'` |
+| Edit issue body | `gh issue edit N --repo "$TRACKER_REPO" --body "B"` | `glab issue update N -R "$TRACKER_REPO" --description "B"` |
+| Comment on issue | `gh issue comment N --repo "$TRACKER_REPO" --body "msg"` | `glab issue note N -R "$TRACKER_REPO" -m "msg"` |
 
 ## Current State
 
-### GitHub-only mode — data sources:
+### Platform-only mode — data sources:
 
 ```bash
 # All ideas
-gh issue list --repo "$GH_REPO" --label idea --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null
+gh issue list --repo "$TRACKER_REPO" --label idea --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null
+# GitLab: glab issue list -R "$TRACKER_REPO" -l idea --state opened --output json | jq '.[] | "#\(.iid) \(.title)"' 2>/dev/null
 # Completed tasks
-gh issue list --repo "$GH_REPO" --label "task,status:done" --state closed --limit 200 --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null
+gh issue list --repo "$TRACKER_REPO" --label "task,status:done" --state closed --limit 200 --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:done" --state closed --per-page 200 --output json | jq '.[] | "#\(.iid) \(.title)"' 2>/dev/null
 # In-progress tasks
-gh issue list --repo "$GH_REPO" --label "task,status:in-progress" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null
+gh issue list --repo "$TRACKER_REPO" --label "task,status:in-progress" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:in-progress" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"' 2>/dev/null
 # Pending tasks
-gh issue list --repo "$GH_REPO" --label "task,status:todo" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null
+gh issue list --repo "$TRACKER_REPO" --label "task,status:todo" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"' 2>/dev/null
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:todo" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"' 2>/dev/null
 ```
 
 ### Local/Dual mode — data sources:
@@ -58,9 +73,11 @@ The user wants to refactor: **$ARGUMENTS**
 
 ### Step 1: Load Ideas
 
-**In GitHub-only mode:**
-- If an IDEA-NNN code was provided: `gh issue view $(gh issue list --repo "$GH_REPO" --search "[IDEA-NNN] in:title" --label idea --json number --jq '.[0].number') --repo "$GH_REPO" --json number,title,body`
-- If no argument: `gh issue list --repo "$GH_REPO" --label idea --state open --json number,title,body`
+**In Platform-only mode:**
+- If an IDEA-NNN code was provided: `gh issue view $(gh issue list --repo "$TRACKER_REPO" --search "[IDEA-NNN] in:title" --label idea --json number --jq '.[0].number') --repo "$TRACKER_REPO" --json number,title,body`
+  <!-- # GitLab: glab issue view $(glab issue list -R "$TRACKER_REPO" --search "[IDEA-NNN]" -l idea --output json | jq '.[0].iid') -R "$TRACKER_REPO" --output json -->
+- If no argument: `gh issue list --repo "$TRACKER_REPO" --label idea --state open --json number,title,body`
+  <!-- # GitLab: glab issue list -R "$TRACKER_REPO" -l idea --state opened --output json | jq '.' -->
 
 **In local/dual mode:**
 - If an IDEA-NNN code was provided: Read only that specific idea from `ideas.txt`.
@@ -80,10 +97,13 @@ Read key files to understand the current state of the project:
 
 Also check what tasks have been planned/completed:
 
-**In GitHub-only mode:**
-- Completed tasks: `gh issue list --repo "$GH_REPO" --label "task,status:done" --state closed --limit 200 --json number,title`
-- In-progress tasks: `gh issue list --repo "$GH_REPO" --label "task,status:in-progress" --state open --json number,title`
-- Pending tasks: `gh issue list --repo "$GH_REPO" --label "task,status:todo" --state open --json number,title`
+**In Platform-only mode:**
+- Completed tasks: `gh issue list --repo "$TRACKER_REPO" --label "task,status:done" --state closed --limit 200 --json number,title`
+  <!-- # GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:done" --state closed --per-page 200 --output json | jq '.' -->
+- In-progress tasks: `gh issue list --repo "$TRACKER_REPO" --label "task,status:in-progress" --state open --json number,title`
+  <!-- # GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:in-progress" --state opened --output json | jq '.' -->
+- Pending tasks: `gh issue list --repo "$TRACKER_REPO" --label "task,status:todo" --state open --json number,title`
+  <!-- # GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:todo" --state opened --output json | jq '.' -->
 
 **In local/dual mode:**
 - `done.txt` — completed tasks (fully)
@@ -152,15 +172,19 @@ Use `AskUserQuestion` to ask the user what to do:
 
 ### Step 6: Apply Changes
 
-**In GitHub-only mode:**
+**In Platform-only mode:**
 
 For ideas marked **NEEDS UPDATE** (and confirmed by user):
-- Read the current issue body: `gh issue view $ISSUE_NUM --repo "$GH_REPO" --json body --jq '.body'`
-- Update the issue body with revised content: `gh issue edit $ISSUE_NUM --repo "$GH_REPO" --body "$NEW_BODY"`
-- Add a comment: `gh issue comment $ISSUE_NUM --repo "$GH_REPO" --body "Idea updated via /idea-refactor (YYYY-MM-DD): [brief description of what changed]"`
+- Read the current issue body: `gh issue view $ISSUE_NUM --repo "$TRACKER_REPO" --json body --jq '.body'`
+  <!-- # GitLab: glab issue view $ISSUE_NUM -R "$TRACKER_REPO" --output json | jq '.description' -->
+- Update the issue body with revised content: `gh issue edit $ISSUE_NUM --repo "$TRACKER_REPO" --body "$NEW_BODY"`
+  <!-- # GitLab: glab issue update $ISSUE_NUM -R "$TRACKER_REPO" --description "$NEW_BODY" -->
+- Add a comment: `gh issue comment $ISSUE_NUM --repo "$TRACKER_REPO" --body "Idea updated via /idea-refactor (YYYY-MM-DD): [brief description of what changed]"`
+  <!-- # GitLab: glab issue note $ISSUE_NUM -R "$TRACKER_REPO" -m "Idea updated via /idea-refactor (YYYY-MM-DD): [brief description of what changed]" -->
 
 For ideas marked **REDUNDANT**, **DUPLICATE**, or **OBSOLETE** (if user confirms):
-- Add a comment: `gh issue comment $ISSUE_NUM --repo "$GH_REPO" --body "Flagged as [status] by /idea-refactor. Recommended for disapproval."`
+- Add a comment: `gh issue comment $ISSUE_NUM --repo "$TRACKER_REPO" --body "Flagged as [status] by /idea-refactor. Recommended for disapproval."`
+  <!-- # GitLab: glab issue note $ISSUE_NUM -R "$TRACKER_REPO" -m "Flagged as [status] by /idea-refactor. Recommended for disapproval." -->
 - Suggest using `/idea-disapprove IDEA-NNN` for each one
 
 **In dual sync mode:**
@@ -169,7 +193,7 @@ For ideas marked **NEEDS UPDATE** (and confirmed by user):
 1. Find the idea block in `ideas.txt`
 2. Use `Edit` to update the DESCRIPTION and/or MOTIVATION with the new text
 3. Add or update a `Last updated: YYYY-MM-DD` line after the `Date:` field
-4. Sync to GitHub (update issue body + add comment)
+4. Sync to platform (update issue body + add comment)
 
 For ideas marked **REDUNDANT**, **DUPLICATE**, or **OBSOLETE** (if user confirms):
 - Suggest using `/idea-disapprove IDEA-NNN` for each one — do NOT remove them directly

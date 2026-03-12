@@ -323,7 +323,7 @@ The following skills are now configured for your project:
 - `/app-stop` — stops your dev server
 - `/app-restart` — restarts your dev server
 - `/test-engineer` — configured for [test framework] with CI pipeline template
-- `/task-create`, `/task-pick` — architecture-aware task templates
+- `/task-create`, `/task-pick` — architecture-aware task templates with platform-agnostic issues tracker support (GitHub and GitLab)
 - `/idea-create` — project-relevant idea categories
 - `/docs` — documentation with project-specific categories
 - `/task-scout` — feature scouting tuned to your project domain
@@ -332,47 +332,55 @@ The following skills are now configured for your project:
 - `/git-publish` — push develop and open auto-merging PR into main
 ```
 
-### Step 8: GitHub Issues Integration (Optional)
+### Step 8: Issues Tracker Integration (Optional)
 
-After the orientation report, ask the user if they want to enable GitHub Issues integration for task and idea tracking.
+After the orientation report, ask the user if they want to enable issues tracker integration (GitHub or GitLab) for task and idea tracking.
 
 Use `AskUserQuestion` with these options:
-- **"Yes, enable GitHub Issues"** — proceed with setup
+- **"Yes, enable issues tracker"** — proceed with setup
 - **"No, use local files only"** — skip this step
 
 STOP HERE after calling `AskUserQuestion`. Do NOT proceed until the user responds.
 
-**If the user chose "Yes, enable GitHub Issues":**
+**If the user chose "Yes, enable issues tracker":**
 
-1. Copy the example config:
+1. Ask which platform:
+   Use `AskUserQuestion` to ask which platform:
+   - **"GitHub"** — set `platform: "github"`
+   - **"GitLab"** — set `platform: "gitlab"`
+
+   STOP HERE after calling `AskUserQuestion`. Do NOT proceed until the user responds.
+
+2. Copy the example config:
    ```bash
-   cp .claude/github-issues.example.json .claude/github-issues.json
+   cp .claude/issues-tracker.example.json .claude/issues-tracker.json
    ```
 
-2. Ask the user for their GitHub repository (e.g., `user/project`):
+3. Ask the user for their repository (e.g., `user/project`):
    Use `AskUserQuestion` with a free-text prompt.
 
-3. Update the config with the provided repo:
+4. Update the config with the provided repo and platform:
    ```bash
-   jq --arg repo "$REPO" '.repo = $repo | .enabled = true' .claude/github-issues.json > tmp.json && mv tmp.json .claude/github-issues.json
+   jq --arg repo "$REPO" --arg platform "$PLATFORM" '.repo = $repo | .platform = $platform | .enabled = true' .claude/issues-tracker.json > tmp.json && mv tmp.json .claude/issues-tracker.json
    ```
 
-4. Ask the user about the sync mode:
+5. Ask the user about the sync mode:
    Use `AskUserQuestion` with these options:
-   - **"GitHub-only (no local task files)"** — set `sync: false`
-   - **"Dual sync (local files + GitHub)"** — set `sync: true`
+   - **"Platform-only (no local task files)"** — set `sync: false`
+   - **"Dual sync (local files + platform)"** — set `sync: true`
 
-5. Run the label setup script:
+6. Run the label setup script:
    ```bash
-   bash scripts/setup-github-labels.sh
+   bash scripts/setup-labels.sh
    ```
 
-6. Report the GitHub Issues setup:
-   > "GitHub Issues integration enabled:
+7. Report the issues tracker setup:
+   > "Issues tracker integration enabled:
+   > - Platform: [GitHub / GitLab]
    > - Repository: [repo]
-   > - Mode: [GitHub-only / Dual sync]
-   > - Labels: created on GitHub
-   > - All task/idea skills will now use GitHub Issues"
+   > - Mode: [Platform-only / Dual sync]
+   > - Labels: created on [platform]
+   > - All task/idea skills will now use [platform] issues"
 
 ## Important Rules
 

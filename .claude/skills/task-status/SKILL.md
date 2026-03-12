@@ -13,56 +13,74 @@ You are a task status reporter. Analyze the data below and present a clear, well
 Determine the operating mode first:
 
 ```bash
-GH_ENABLED="$(jq -r '.enabled // false' .claude/github-issues.json 2>/dev/null)"
-GH_SYNC="$(jq -r '.sync // false' .claude/github-issues.json 2>/dev/null)"
-GH_REPO="$(jq -r '.repo' .claude/github-issues.json 2>/dev/null)"
+TRACKER_CFG=".claude/issues-tracker.json"; [ ! -f "$TRACKER_CFG" ] && TRACKER_CFG=".claude/github-issues.json"
+PLATFORM="$(jq -r '.platform // "github"' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_ENABLED="$(jq -r '.enabled // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_SYNC="$(jq -r '.sync // false' "$TRACKER_CFG" 2>/dev/null)"
+TRACKER_REPO="$(jq -r '.repo' "$TRACKER_CFG" 2>/dev/null)"
 ```
 
-- **GitHub-only mode** (`GH_ENABLED=true` AND `GH_SYNC != true`): Use GitHub Issues as the sole data source. Skip all local file reads.
-- **Dual sync mode** (`GH_ENABLED=true` AND `GH_SYNC=true`): Use local files as primary, GitHub as secondary.
-- **Local only mode** (`GH_ENABLED=false` or config missing): Use local files only.
+- **Platform-only mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC != true`): Use platform issues as the sole data source. Skip all local file reads.
+- **Dual sync mode** (`TRACKER_ENABLED=true` AND `TRACKER_SYNC=true`): Use local files as primary, platform as secondary.
+- **Local only mode** (`TRACKER_ENABLED=false` or config missing): Use local files only.
+
+## Platform Commands
+
+| Operation | GitHub | GitLab |
+|-----------|--------|--------|
+| List issues (JSON) | `gh issue list --repo "$TRACKER_REPO" --label L --state open --json f --jq 'e'` | `glab issue list -R "$TRACKER_REPO" -l L --state opened --output json \| jq 'e'` |
+| List issues (state) | `--state open` / `--state closed` | `--state opened` / `--state closed` |
 
 ---
 
-## GitHub-Only Mode
+## Platform-Only Mode
 
-If in GitHub-only mode, gather all data from GitHub Issues:
+If in platform-only mode, gather all data from platform issues:
 
 ### Task Summary
 
 ```bash
-TODO_COUNT=$(gh issue list --repo "$GH_REPO" --label "task,status:todo" --state open --json number --jq 'length' 2>/dev/null)
-PROGRESS_COUNT=$(gh issue list --repo "$GH_REPO" --label "task,status:in-progress" --state open --json number --jq 'length' 2>/dev/null)
-DONE_COUNT=$(gh issue list --repo "$GH_REPO" --label "task,status:done" --state closed --json number --jq 'length' 2>/dev/null)
+TODO_COUNT=$(gh issue list --repo "$TRACKER_REPO" --label "task,status:todo" --state open --json number --jq 'length' 2>/dev/null)
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:todo" --state opened --output json | jq 'length'
+PROGRESS_COUNT=$(gh issue list --repo "$TRACKER_REPO" --label "task,status:in-progress" --state open --json number --jq 'length' 2>/dev/null)
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:in-progress" --state opened --output json | jq 'length'
+DONE_COUNT=$(gh issue list --repo "$TRACKER_REPO" --label "task,status:done" --state closed --json number --jq 'length' 2>/dev/null)
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:done" --state closed --output json | jq 'length'
 ```
 
 ### In-Progress Tasks
 
 ```bash
-gh issue list --repo "$GH_REPO" --label "task,status:in-progress" --state open --json number,title,labels --jq '.[] | "#\(.number) \(.title)"'
+gh issue list --repo "$TRACKER_REPO" --label "task,status:in-progress" --state open --json number,title,labels --jq '.[] | "#\(.number) \(.title)"'
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:in-progress" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"'
 ```
 
 ### Completed Tasks
 
 ```bash
-gh issue list --repo "$GH_REPO" --label "task,status:done" --state closed --limit 20 --json number,title --jq '.[] | "#\(.number) \(.title)"'
+gh issue list --repo "$TRACKER_REPO" --label "task,status:done" --state closed --limit 20 --json number,title --jq '.[] | "#\(.number) \(.title)"'
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:done" --state closed --per-page 20 --output json | jq '.[] | "#\(.iid) \(.title)"'
 ```
 
 ### Pending Tasks (by priority)
 
 ```bash
 # High priority
-gh issue list --repo "$GH_REPO" --label "task,status:todo,priority:high" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
+gh issue list --repo "$TRACKER_REPO" --label "task,status:todo,priority:high" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:todo,priority:high" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"'
 # Medium priority
-gh issue list --repo "$GH_REPO" --label "task,status:todo,priority:medium" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
+gh issue list --repo "$TRACKER_REPO" --label "task,status:todo,priority:medium" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:todo,priority:medium" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"'
 # Low priority
-gh issue list --repo "$GH_REPO" --label "task,status:todo,priority:low" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
+gh issue list --repo "$TRACKER_REPO" --label "task,status:todo,priority:low" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "task,status:todo,priority:low" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"'
 ```
 
 ### Ideas (open)
 
 ```bash
-gh issue list --repo "$GH_REPO" --label "idea" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
+gh issue list --repo "$TRACKER_REPO" --label "idea" --state open --json number,title --jq '.[] | "#\(.number) \(.title)"'
+# GitLab: glab issue list -R "$TRACKER_REPO" -l "idea" --state opened --output json | jq '.[] | "#\(.iid) \(.title)"'
 ```
 
 Present the report following the same format as below (Instructions section).
@@ -99,13 +117,13 @@ Present the information above as a structured English-language report with these
 
 1. **Summary** — A table with task counts by status (completed, in-progress, todo, blocked) and overall progress percentage.
 
-2. **In-Progress Tasks** — For each task marked `[~]` (local) or with `status:in-progress` label (GitHub), show:
+2. **In-Progress Tasks** — For each task marked `[~]` (local) or with `status:in-progress` label (platform), show:
    - Task code and title
    - Priority
    - What remains to be done
    - Files involved
 
-3. **Next Recommended Tasks** — Based on the recommended implementation order (local mode) or priority labels (GitHub-only mode), identify the next 2-3 tasks that should be picked up. For each show:
+3. **Next Recommended Tasks** — Based on the recommended implementation order (local mode) or priority labels (platform-only mode), identify the next 2-3 tasks that should be picked up. For each show:
    - Task code and title
    - Priority
    - Dependencies and whether they are satisfied
