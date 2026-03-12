@@ -28,7 +28,7 @@ CTDF gives your AI-assisted development workflow a structured backbone: ideas ar
 ### From Marketplace
 
 ```
-/plugin marketplace add dnviti/claude-task-development-framework
+/plugin marketplace add https://github.com/dnviti/claude-task-development-framework
 /plugin install ctdf@dnviti-claude-task-development-framework
 ```
 
