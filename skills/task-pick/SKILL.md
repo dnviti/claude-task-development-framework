@@ -192,11 +192,11 @@ Present it in this format:
 
 The guide must be actionable and specific — use real URLs, real UI element names, and real API endpoints from the implementation. Do not use generic placeholders.
 
-**6a.5. Mark task as to-test:**
+**6a.5. Mark task as to-test AND persist test procedure:**
 
-Before asking the user to confirm, add the `status:to-test` label to signal the task is awaiting test verification. Keep the `status:in-progress` label in place — `to-test` is an additive marker.
+Before asking the user to confirm, add the `status:to-test` label and save the testing guide so it survives chat closure.
 
-**In platform-only or dual sync mode:**
+**Step 1 — Add `status:to-test` label (platform-only or dual sync mode):**
 ```bash
 ISSUE_NUM=$(gh issue list --repo "$TRACKER_REPO" --search "[TASK-CODE] in:title" --label task --state open --json number --jq '.[0].number')
 # GitLab: glab issue list -R "$TRACKER_REPO" --search "[TASK-CODE]" -l task --state opened --output json | jq '.[0].iid'
@@ -204,7 +204,23 @@ gh issue edit "$ISSUE_NUM" --repo "$TRACKER_REPO" --add-label "status:to-test"
 # GitLab: glab issue update "$ISSUE_NUM" -R "$TRACKER_REPO" --label "status:to-test"
 ```
 
-**In local only mode:** No label change needed — the to-test state is implicit within this flow.
+**Step 2 — Post test procedure as a comment (platform-only or dual sync mode):**
+```bash
+gh issue comment "$ISSUE_NUM" --repo "$TRACKER_REPO" \
+  --body "## Test Procedure
+
+[full testing guide text from step 6a — Prerequisites + Steps to test + Edge cases]"
+# GitLab: glab issue note "$ISSUE_NUM" -R "$TRACKER_REPO" \
+#   -m "## Test Procedure\n\n[full testing guide text from step 6a]"
+```
+
+**Step 3 — Append to local task block (local-only or dual sync mode):**
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py add-test-procedure TASK-CODE \
+  --body "[full testing guide text from step 6a — Prerequisites + Steps to test + Edge cases]"
+```
+
+**In local only mode:** Skip Step 1 (no label) — perform Step 3 only.
 
 **6b. Ask for user confirmation:**
 

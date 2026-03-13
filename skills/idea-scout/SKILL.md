@@ -109,6 +109,33 @@ Every time you are invoked, you must:
 
 5. **Add worthy ideas** following the appropriate mode:
 
+   Before adding each idea, run a **formal duplicate check (sub-step 5.0)**:
+
+   **Sub-step 5.0 — Duplicate check (run per idea before adding):**
+
+   **Local/dual-sync mode:**
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py duplicates \
+     --keywords "keyword1,keyword2,keyword3"
+   # (scans to-do.txt, progressing.txt, done.txt, ideas.txt, idea-disapproved.txt)
+   ```
+   If matches are found → **skip this idea**; add it to the "considered but rejected" list with reason "already exists as task/idea [CODE]".
+
+   **Platform-only mode:**
+   ```bash
+   # Check tasks
+   gh issue list --repo "$TRACKER_REPO" --label task --state all \
+     --search "keyword1 keyword2" --json number,title,state --limit 10
+
+   # Check ideas
+   gh issue list --repo "$TRACKER_REPO" --label idea --state all \
+     --search "keyword1 keyword2" --json number,title,state --limit 10
+   # GitLab: replace gh/--label with glab/-l equivalents
+   ```
+   If similar items are found → **skip this idea** with reason noted.
+
+   Only proceed to add the idea if no duplicates are found.
+
    ### Platform-only mode
    Create platform issues directly using:
    ```bash

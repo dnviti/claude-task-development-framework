@@ -689,6 +689,36 @@ def cmd_verify_files(args):
 
 # ── Subcommand: move ────────────────────────────────────────────────────────
 
+def cmd_add_test_procedure(args):
+    root = find_project_root()
+    code = args.code.upper()
+    prog_path = root / "progressing.txt"
+
+    block = find_block(prog_path, code)
+    if not block:
+        print(json.dumps({"success": False, "error": f"Task {code} not found in progressing.txt"}))
+        sys.exit(1)
+
+    indented = "\n".join(f"  {line}" if line.strip() else "" for line in args.body.split("\n"))
+    new_section = f"\n  TEST PROCEDURE:\n{indented}"
+
+    lines = read_lines(prog_path)
+    block_lines = lines[block["line_start"]:block["line_end"] + 1]
+    block_text = "\n".join(block_lines)
+
+    # Insert before the closing separator
+    last_sep_pos = block_text.rfind(SEPARATOR)
+    if last_sep_pos != -1:
+        block_text = block_text[:last_sep_pos] + new_section + "\n" + block_text[last_sep_pos:]
+    else:
+        block_text += new_section
+
+    new_block_lines = block_text.split("\n")
+    new_lines = lines[:block["line_start"]] + new_block_lines + lines[block["line_end"] + 1:]
+    write_lines(prog_path, new_lines)
+    print(json.dumps({"success": True, "code": code}))
+
+
 def cmd_move(args):
     root = find_project_root()
     code = args.code.upper()
@@ -1518,6 +1548,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("verify-files", help="Check file existence for a task")
     p.add_argument("code", help="Task code (e.g., AUTH-0001)")
     p.set_defaults(func=cmd_verify_files)
+
+    # add-test-procedure
+    p = sub.add_parser("add-test-procedure", help="Append TEST PROCEDURE section to a progressing task block")
+    p.add_argument("code", help="Task code (e.g., AUTH-0001)")
+    p.add_argument("--body", required=True, help="Test procedure text")
+    p.set_defaults(func=cmd_add_test_procedure)
 
     # move
     p = sub.add_parser("move", help="Move a task between files")

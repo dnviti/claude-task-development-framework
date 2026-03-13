@@ -177,18 +177,24 @@ Then use `AskUserQuestion` with these options:
 Before writing, perform a final duplicate check:
 
 **In Platform-only mode:**
-1. Search platform issues for key concepts:
+1. Search platform issues for key concepts — check **both tasks and ideas**:
    ```bash
-   gh issue list --repo "$TRACKER_REPO" --label task --state all --search "keyword1 keyword2" --json title,number,state --jq '.[] | "#\(.number) [\(.state)] \(.title)"'
-   # GitLab: glab issue list -R "$TRACKER_REPO" -l task --search "keyword1 keyword2" --output json | jq '.[] | "#\(.iid) [\(.state)] \(.title)"'
+   # Check tasks
+   gh issue list --repo "$TRACKER_REPO" --label task --state all --search "keyword1 keyword2" --json title,number,state --jq '.[] | "#\(.number) [task/\(.state)] \(.title)"'
+   # GitLab: glab issue list -R "$TRACKER_REPO" -l task --search "keyword1 keyword2" --output json | jq '.[] | "#\(.iid) [task/\(.state)] \(.title)"'
+
+   # Also check ideas
+   gh issue list --repo "$TRACKER_REPO" --label idea --state all --search "keyword1 keyword2" --json title,number,state --jq '.[] | "#\(.number) [idea/\(.state)] \(.title)"'
+   # GitLab: glab issue list -R "$TRACKER_REPO" -l idea --search "keyword1 keyword2" --output json | jq '.[] | "#\(.iid) [idea/\(.state)] \(.title)"'
    ```
-2. If a potentially similar task is found, warn the user and ask whether to proceed or abort.
+2. If a potentially similar task **or idea** is found, warn the user and ask whether to proceed or abort.
 3. If no duplicates found, continue to Step 8.
 
 **In local only and dual sync modes:**
 1. Run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py duplicates --keywords "keyword1,keyword2,keyword3"`
    Use 2-3 key terms from the task title and description as keywords.
-2. If the JSON output contains matches that look like a similar task, warn the user and ask whether to proceed or abort.
+   (The `duplicates` command scans all files: `to-do.txt`, `progressing.txt`, `done.txt`, `ideas.txt`, and `idea-disapproved.txt`.)
+2. If the JSON output contains matches that look like a similar task **or idea**, warn the user and ask whether to proceed or abort.
 3. If no duplicates found, continue to Step 8.
 
 ### Step 8: Insert the Task into to-do.txt
