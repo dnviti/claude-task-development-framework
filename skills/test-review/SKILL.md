@@ -21,6 +21,12 @@ Use the `mode` field to determine behavior: `platform-only`, `dual-sync`, or `lo
 
 Use `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py platform-cmd <operation> [key=value ...]` to generate the correct CLI command for the detected platform (GitHub/GitLab).
 
+## Worktree Detection
+
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info`
+
+If `in_worktree` is `true`, all file creation/modification happens in the worktree (source code isolation). Task management queries automatically use the main repository. When testing is finalized and the task is completed, the worktree is automatically removed (see Phase T7).
+
 ## Test Configuration
 
 Read CLAUDE.md's `## Development Commands` section to extract:
@@ -173,12 +179,13 @@ When all tests pass:
 
    Read CLAUDE.md `## Development Commands` for `RELEASE_BRANCH`. If not configured, detect from git branches (`develop` if exists, else `main`).
 
-   Check if the task branch exists and has not been merged:
+   Check if the task branch exists (via worktree or branch listing):
    ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info
    git branch --list "task/<task-code-lowercase>"
    ```
 
-   If the branch exists but was never merged to the release branch, offer to create a PR:
+   If the branch exists (either in a worktree or as a standalone branch) but was never merged to the release branch, offer to create a PR:
 
    Use `AskUserQuestion` with options:
    - **"Yes, create PR into release branch"** — execute:
@@ -209,7 +216,16 @@ When all tests pass:
 
    - **"No, stay on current branch"** — skip PR creation
 
-4. **Inform the user:**
+4. **Remove the task worktree (if in one):**
+
+   If currently inside a worktree for this task (check `worktree-info`), automatically remove it after PR creation or after informing the user testing is complete:
+   ```bash
+   cd <main_root>
+   git worktree remove .worktrees/task/<task-code-lowercase> 2>/dev/null || git worktree remove --force .worktrees/task/<task-code-lowercase>
+   ```
+   Inform the user: "Worktree removed. The task branch still exists for the PR. Use `/task-continue [TASK-CODE]` to re-enter a fresh worktree if needed."
+
+5. **Inform the user:**
 
    > "Testing for [TASK-CODE] is complete. All automated and manual tests passed. The task is now eligible for release."
 

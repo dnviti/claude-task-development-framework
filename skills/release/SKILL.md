@@ -53,6 +53,24 @@ Parse `$ARGUMENTS` to determine the operation:
 
 ## Release Workflow
 
+### Worktree Check
+
+Before proceeding with any release, check the worktree context:
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info
+```
+
+If `in_worktree` is `true`, warn the user:
+
+> "You are currently in a worktree (`<worktree_root>`). Releases should be performed from the main repository on the release branch."
+
+Use `AskUserQuestion` with options:
+- **"Switch to main repository"** — change the working directory to `main_root` and continue
+- **"Abort release"** — stop here
+
+STOP HERE after calling `AskUserQuestion`. Do NOT proceed until the user responds.
+
 ### Platform Detection
 
 `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py platform-config`

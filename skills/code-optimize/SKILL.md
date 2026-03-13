@@ -11,6 +11,12 @@ You are a senior software engineer performing code quality optimization on this 
 
 Always respond and work in English.
 
+## Worktree Detection
+
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info`
+
+If `in_worktree` is `true`, you are already inside a task worktree. The optimization worktree will be created from the main repository root regardless.
+
 ## Target Scope
 
 The user requested target: **$ARGUMENTS**
@@ -58,29 +64,35 @@ Record these — Category 5 (Missing Utility Adoption) depends on knowing what u
 
 ## Instructions
 
-### Step 0: Create a Git Branch
+### Step 0: Create an Optimization Worktree
 
-Before any analysis or changes, create a dedicated branch to isolate all optimization work.
+Before any analysis or changes, create a dedicated worktree to isolate all optimization work.
 
 **0a. Check for uncommitted changes:**
 
 Run `git status --porcelain`. If there are uncommitted changes, inform the user:
 
-> "There are uncommitted changes in the working tree. Please commit or stash them before running code-optimize, so the optimization branch starts from a clean state."
+> "There are uncommitted changes in the working tree. Please commit or stash them before running code-optimize, so the optimization worktree starts from a clean state."
 
 Stop and do not proceed.
 
-**0b. Record the current branch:**
-
-Run `git branch --show-current` and record it as the base branch.
-
-**0c. Create the optimization branch:**
-
+**0b. Get worktree context:**
 ```bash
-git checkout -b refactor/code-optimize-$(date +%Y%m%d-%H%M%S)
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info
+```
+Record the `main_root` path and the current branch as the base.
+
+**0c. Create the optimization worktree (named after the branch):**
+```bash
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+BRANCH_NAME="refactor/code-optimize-$TIMESTAMP"
+WORKTREE_DIR="<main_root>/.worktrees/refactor/code-optimize-$TIMESTAMP"
+mkdir -p "<main_root>/.worktrees/refactor"
+grep -qxF '.worktrees/' "<main_root>/.gitignore" 2>/dev/null || echo '.worktrees/' >> "<main_root>/.gitignore"
+git worktree add "$WORKTREE_DIR" -b "$BRANCH_NAME"
 ```
 
-Inform the user which branch was created and from which base branch.
+Change the working directory to `$WORKTREE_DIR`. Inform the user which worktree was created and from which base branch.
 
 ---
 
@@ -269,10 +281,13 @@ If confirmed:
    )"
    ```
 3. Inform the user:
-   > "Changes committed on branch `refactor/code-optimize-...`.
-   > Merge into your working branch with:
-   > `git checkout [base-branch] && git merge refactor/code-optimize-...`
+   > "Changes committed on worktree branch `refactor/code-optimize-...`.
+   > To merge: `cd <main_root> && git merge refactor/code-optimize-...`
    > Or create a PR with `gh pr create`."
+
+4. Ask about worktree cleanup using `AskUserQuestion`:
+   - **"Remove worktree"** — execute: `cd <main_root> && git worktree remove .worktrees/refactor/code-optimize-...`
+   - **"Keep worktree"** — leave in place for further review
 
 If declined, inform them changes are unstaged on the branch for manual review.
 

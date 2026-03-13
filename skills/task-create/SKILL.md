@@ -25,6 +25,12 @@ Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`
 
 Example: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
+## Worktree Detection
+
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info`
+
+If `in_worktree` is `true`, task management files (`to-do.txt`, `progressing.txt`, `done.txt`) live in the **main repository**, not the worktree. Store the `main_root` value. All `task_manager.py` commands automatically use the main repository for task files. When using the `Edit` tool on `to-do.txt`, use the full path: `<main_root>/to-do.txt`.
+
 ## Current Task State
 
 ### In Platform-only mode:

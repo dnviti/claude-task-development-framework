@@ -41,6 +41,12 @@ If these values are not configured in CLAUDE.md, detect them from project config
 ### GitHub Actions workflows:
 `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py find-files --patterns "*.yml,*.yaml" --max-depth 3 --limit 10`
 
+## Worktree Detection
+
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info`
+
+If `in_worktree` is `true`, the analysis covers the worktree's codebase. Include the scope in the report header: **Analyzed from:** `worktree task/<code>` or `main repository`.
+
 ## Arguments
 
 The user invoked with: **$ARGUMENTS**

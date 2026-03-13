@@ -25,6 +25,12 @@ Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`
 
 Example: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
+## Worktree Detection
+
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info`
+
+Use the `in_worktree`, `main_root`, and `worktrees` fields to determine context. Task management files (`to-do.txt`, `progressing.txt`, `done.txt`) always live in `main_root`. Source code for the current task lives in the worktree directory.
+
 ---
 
 ## Current Task State
@@ -62,16 +68,34 @@ The user wants to continue working on a task. The argument provided is: **$ARGUM
 - **If no argument was provided and exactly one in-progress task exists:** Use that task automatically.
 - **If no argument was provided and multiple in-progress tasks exist:** Use `AskUserQuestion` to let the user choose which task to continue.
 
-### Step 1.5: Switch to the task branch
+### Step 1.5: Enter or create the task worktree
 
-After selecting the task, check if a dedicated task branch exists:
+After selecting the task, set up an isolated worktree for the implementation work.
 
+**1.5a. Get worktree context:**
 ```bash
-git branch --list "task/<task-code-lowercase>"
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info
 ```
+Store the `main_root` path and check the `worktrees` array.
 
-- **If the branch exists and you are not already on it:** Switch to it: `git checkout task/<task-code-lowercase>`. Inform the user.
-- **If the branch does not exist:** Inform the user that no task branch was found and continue on the current branch.
+**1.5b. Determine the worktree state:**
+
+- **If already in the correct worktree** (the `task_code` from `worktree-info` matches the selected task): No action needed. Inform the user and proceed to Step 2.
+
+- **If a worktree already exists for this task** (found in the `worktrees` array): Change the working directory to that worktree path. Inform the user: "Entering existing worktree for `[TASK-CODE]`."
+
+- **If no worktree exists but the branch exists** (normal case — worktree was removed when task was previously closed):
+  ```bash
+  WORKTREE_DIR="<main_root>/.worktrees/task/<task-code-lowercase>"
+  mkdir -p "<main_root>/.worktrees/task"
+  grep -qxF '.worktrees/' "<main_root>/.gitignore" 2>/dev/null || echo '.worktrees/' >> "<main_root>/.gitignore"
+  git worktree add "$WORKTREE_DIR" task/<task-code-lowercase>
+  ```
+  Change the working directory to `$WORKTREE_DIR`. Inform the user: "Created fresh worktree from existing branch `task/<task-code-lowercase>`."
+
+- **If neither worktree nor branch exists:** Inform the user that no task branch or worktree was found. Suggest using `/task-pick <TASK-CODE>` to properly set up the task.
+
+**Important:** All subsequent steps operate within the worktree directory.
 
 ### Step 2: Read the Full Task Block
 

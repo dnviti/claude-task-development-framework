@@ -73,6 +73,31 @@ def find_project_root() -> Path:
         return Path.cwd()
 
 
+def get_main_repo_root() -> Path:
+    """Return main repo root, even from inside a git worktree.
+
+    In a worktree, git rev-parse --show-toplevel returns the *worktree* root.
+    This function detects that case and returns the actual main repo root so
+    that releases.json and task files are always found correctly.
+    """
+    try:
+        common = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        git_dir = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        common_path = Path(common).resolve()
+        git_dir_path = Path(git_dir).resolve()
+        if common_path != git_dir_path:
+            return common_path.parent
+        return find_project_root()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return find_project_root()
+
+
 # ── Version Detection ───────────────────────────────────────────────────────
 
 def read_version_from_package_json(filepath: Path) -> str | None:
@@ -413,7 +438,7 @@ def cmd_generate_changelog(args):
 
 def _releases_path() -> Path:
     """Return path to releases.json at project root."""
-    return find_project_root() / "releases.json"
+    return get_main_repo_root() / "releases.json"
 
 
 def _read_releases() -> list[dict]:
@@ -460,7 +485,7 @@ def cmd_release_plan_list(args):
         return
 
     # Try to cross-reference task statuses from local files
-    root = find_project_root()
+    root = get_main_repo_root()
     task_statuses = {}
 
     # Import task_manager functions by reading task files directly

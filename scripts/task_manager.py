@@ -72,6 +72,49 @@ def find_project_root() -> Path:
     return Path.cwd()
 
 
+def get_main_repo_root() -> Path:
+    """Return main repo root, even from inside a git worktree.
+
+    In a worktree, git rev-parse --show-toplevel returns the *worktree* root,
+    not the main repository root.  This function detects that case and returns
+    the actual main repo root so that task files (to-do.txt, progressing.txt,
+    etc.) and config files (.claude/) are always found correctly.
+    """
+    try:
+        common = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        git_dir = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        common_path = Path(common).resolve()
+        git_dir_path = Path(git_dir).resolve()
+        if common_path != git_dir_path:
+            # Inside a worktree: common_dir is /path/to/main/.git
+            return common_path.parent
+        return find_project_root()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return find_project_root()
+
+
+def is_in_worktree() -> bool:
+    """Return True if CWD is inside a git worktree (not the main repo)."""
+    try:
+        common = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        git_dir = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        return Path(common).resolve() != Path(git_dir).resolve()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+
 # ── File Reading Helpers ────────────────────────────────────────────────────
 
 def read_lines(filepath: Path) -> list[str]:
@@ -365,11 +408,81 @@ def find_section_range(filepath: Path, section_letter: str) -> tuple[int, int] |
     return (content_start, next_section_line)
 
 
+# ── Subcommand: worktree-info ──────────────────────────────────────────────
+
+def cmd_worktree_info(args):
+    """Return worktree detection and listing as JSON."""
+    in_wt = is_in_worktree()
+    main_root = get_main_repo_root()
+    wt_root = find_project_root()
+
+    # Current branch
+    try:
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        branch = ""
+
+    # Extract task code from branch name (e.g. task/auth-0001 → AUTH-0001)
+    task_code = ""
+    if branch.startswith("task/"):
+        suffix = branch[5:]  # e.g. "auth-0001"
+        m = TASK_CODE_RE.search(suffix.upper())
+        if m:
+            task_code = suffix.upper()
+
+    # List all worktrees
+    worktrees = []
+    try:
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            capture_output=True, text=True, check=True,
+            cwd=str(main_root),
+        )
+        current_wt = {}
+        for line in result.stdout.splitlines():
+            if line.startswith("worktree "):
+                if current_wt:
+                    worktrees.append(current_wt)
+                current_wt = {"path": line[9:]}
+            elif line.startswith("branch refs/heads/"):
+                br = line[18:]
+                current_wt["branch"] = br
+                # Extract task code from branch
+                if br.startswith("task/"):
+                    suffix_upper = br[5:].upper()
+                    m2 = TASK_CODE_RE.search(suffix_upper)
+                    if m2:
+                        current_wt["task_code"] = suffix_upper
+        if current_wt:
+            worktrees.append(current_wt)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Filter to only .worktrees/ entries (not the main repo itself)
+    wt_entries = [
+        w for w in worktrees
+        if ".worktrees" in w.get("path", "")
+    ]
+
+    result = {
+        "in_worktree": in_wt,
+        "worktree_root": str(wt_root) if in_wt else str(main_root),
+        "main_root": str(main_root),
+        "current_branch": branch,
+        "task_code": task_code,
+        "worktrees": wt_entries,
+    }
+    print(json.dumps(result, indent=2))
+
+
 # ── Subcommand: platform-config ────────────────────────────────────────────
 
 def cmd_platform_config(args):
     """Return platform tracker configuration as JSON."""
-    root = find_project_root()
+    root = get_main_repo_root()
 
     config_file = None
     data = {}
@@ -425,7 +538,7 @@ def _next_id_from_stdin(code_re, filter_crypto=True):
 
 
 def cmd_next_id(args):
-    root = find_project_root()
+    root = get_main_repo_root()
     max_num = 0
     prefixes = set()
 
@@ -468,7 +581,7 @@ def cmd_next_id(args):
 # ── Subcommand: list ─────────────────────────────────────────────────────────
 
 def cmd_list(args):
-    root = find_project_root()
+    root = get_main_repo_root()
     results = []
 
     if args.status == "all":
@@ -512,7 +625,7 @@ def cmd_list(args):
 # ── Subcommand: list-ideas ───────────────────────────────────────────────────
 
 def cmd_list_ideas(args):
-    root = find_project_root()
+    root = get_main_repo_root()
     results = []
 
     file_map = {
@@ -550,7 +663,7 @@ def cmd_list_ideas(args):
 # ── Subcommand: parse ────────────────────────────────────────────────────────
 
 def cmd_parse(args):
-    root = find_project_root()
+    root = get_main_repo_root()
     code = args.code.upper()
 
     block, fname = find_block_in_all(root, code)
@@ -567,7 +680,7 @@ def cmd_parse(args):
 # ── Subcommand: summary ─────────────────────────────────────────────────────
 
 def cmd_summary(args):
-    root = find_project_root()
+    root = get_main_repo_root()
     counts = {"done": 0, "progressing": 0, "todo": 0, "blocked": 0}
 
     for fname, expected in [
@@ -603,7 +716,7 @@ def cmd_summary(args):
 # ── Subcommand: prefixes ────────────────────────────────────────────────────
 
 def cmd_prefixes(args):
-    root = find_project_root()
+    root = get_main_repo_root()
     prefixes = set()
 
     for fname in TASK_FILES:
@@ -621,7 +734,7 @@ def cmd_prefixes(args):
 # ── Subcommand: sections ────────────────────────────────────────────────────
 
 def cmd_sections(args):
-    root = find_project_root()
+    root = get_main_repo_root()
     fp = root / args.file
     if not fp.exists():
         print(json.dumps({"error": f"File {args.file} not found"}))
@@ -634,7 +747,7 @@ def cmd_sections(args):
 # ── Subcommand: duplicates ──────────────────────────────────────────────────
 
 def cmd_duplicates(args):
-    root = find_project_root()
+    root = get_main_repo_root()
     keywords = [k.strip() for k in args.keywords.split(",") if k.strip()]
     files = [f.strip() for f in args.files.split(",")] if args.files else ALL_FILES
 
@@ -661,10 +774,11 @@ def cmd_duplicates(args):
 # ── Subcommand: verify-files ────────────────────────────────────────────────
 
 def cmd_verify_files(args):
-    root = find_project_root()
+    main_root = get_main_repo_root()
+    source_root = find_project_root()  # worktree root for source file checks
     code = args.code.upper()
 
-    block, fname = find_block_in_all(root, code, TASK_FILES)
+    block, fname = find_block_in_all(main_root, code, TASK_FILES)
     if not block:
         print(json.dumps({"error": f"Task {code} not found"}))
         sys.exit(1)
@@ -672,11 +786,11 @@ def cmd_verify_files(args):
     report = {"code": code, "source_file": fname, "create": [], "modify": []}
 
     for f in block.get("files_create", []):
-        exists = (root / f).exists()
+        exists = (source_root / f).exists()
         report["create"].append({"path": f, "exists": exists})
 
     for f in block.get("files_modify", []):
-        exists = (root / f).exists()
+        exists = (source_root / f).exists()
         report["modify"].append({"path": f, "exists": exists})
 
     report["all_exist"] = (
@@ -690,7 +804,7 @@ def cmd_verify_files(args):
 # ── Subcommand: move ────────────────────────────────────────────────────────
 
 def cmd_add_test_procedure(args):
-    root = find_project_root()
+    root = get_main_repo_root()
     code = args.code.upper()
     prog_path = root / "progressing.txt"
 
@@ -720,7 +834,7 @@ def cmd_add_test_procedure(args):
 
 
 def cmd_move(args):
-    root = find_project_root()
+    root = get_main_repo_root()
     code = args.code.upper()
     target_status = args.to
     target_file = FILE_FOR_STATUS.get(target_status)
@@ -892,7 +1006,7 @@ def _find_insert_position(lines: list[str], sections: list[dict]) -> int:
 # ── Subcommand: remove ──────────────────────────────────────────────────────
 
 def cmd_remove(args):
-    root = find_project_root()
+    root = get_main_repo_root()
     code = args.code.upper()
     fp = root / args.file
 
@@ -945,7 +1059,7 @@ def cmd_remove(args):
 
 def cmd_set_release(args):
     """Set or clear the Release: field on a task block."""
-    root = find_project_root()
+    root = get_main_repo_root()
     code = args.code.upper()
     version = args.version  # "None" or a semver string
 
@@ -995,7 +1109,7 @@ def cmd_set_release(args):
 # ── Subcommand: hook ─────────────────────────────────────────────────────────
 
 def cmd_hook(args):
-    root = find_project_root()
+    root = get_main_repo_root()
     filepath = args.filepath
     filename = os.path.basename(filepath)
 
@@ -1051,7 +1165,7 @@ def cmd_hook(args):
 
 def cmd_find_files(args):
     """Cross-platform file search using pathlib glob."""
-    root = find_project_root()
+    root = find_project_root()  # use worktree root for source code search
     patterns = [p.strip() for p in args.patterns.split(",") if p.strip()]
     results = []
 
@@ -1090,7 +1204,7 @@ def cmd_find_files(args):
 
 def _load_platform_config():
     """Load platform config (reuses platform-config logic)."""
-    root = find_project_root()
+    root = get_main_repo_root()
     for candidate in ["issues-tracker.json", "github-issues.json"]:
         fp = root / ".claude" / candidate
         if fp.exists():
@@ -1330,7 +1444,7 @@ def cmd_sync_from_platform(args):
         sys.exit(1)
 
     # ── Parse local tasks ────────────────────────────────────────────
-    root = find_project_root()
+    root = get_main_repo_root()
     local_tasks = {}
     for tf in TASK_FILES:
         fp = root / tf
@@ -1495,6 +1609,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="Task and idea manager CLI for claude-task-development-framework",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    # worktree-info
+    p = sub.add_parser("worktree-info", help="Return worktree detection and listing")
+    p.set_defaults(func=cmd_worktree_info)
 
     # platform-config
     p = sub.add_parser("platform-config", help="Return platform tracker configuration")

@@ -23,6 +23,12 @@ Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`
 
 Example: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
+## Worktree Detection
+
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info`
+
+Use the `in_worktree`, `main_root`, and `worktrees` fields to determine context. Task management files (`to-do.txt`, `progressing.txt`, `done.txt`) always live in `main_root`. Source code for the current task lives in the worktree directory.
+
 ## Release Branch Configuration
 
 Read CLAUDE.md's `## Development Commands` section to extract `RELEASE_BRANCH`. If not configured, detect: use `develop` if that branch exists, otherwise `main`. Use this value wherever `<RELEASE_BRANCH>` appears below.
@@ -103,28 +109,50 @@ gh issue comment "$ISSUE_NUM" --repo "$TRACKER_REPO" --body "Task picked up. Bra
 
 Same as dual sync steps 1-2, skip GitHub sync.
 
-### Step 2.5: Create a task branch
+### Step 2.5: Create a task worktree
 
-Create a dedicated git branch for this task, branching from `<RELEASE_BRANCH>`.
+Create an isolated git worktree for this task, branching from `<RELEASE_BRANCH>`. This enables parallel task work — each task gets its own directory.
 
-**2.5a. Check the working tree:**
+**2.5a. Get worktree context and ensure setup:**
 ```bash
-git status --porcelain
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info
 ```
-If dirty, inform the user and stop.
-
-**2.5b. Switch to the release branch and pull latest:**
+Store the `main_root` path. Then ensure the `.worktrees/` directory exists and is gitignored:
 ```bash
-git checkout <RELEASE_BRANCH>
-git pull origin <RELEASE_BRANCH>
+mkdir -p "<main_root>/.worktrees/task"
+grep -qxF '.worktrees/' "<main_root>/.gitignore" 2>/dev/null || echo '.worktrees/' >> "<main_root>/.gitignore"
 ```
 
-**2.5c. Create the task branch:**
+**2.5b. Check for existing worktree:**
+
+If the `worktrees` array from `worktree-info` already contains an entry with `task_code` matching the selected task, change the working directory to that worktree path. Inform the user: "Entering existing worktree for this task." Skip to Step 3.
+
+**2.5c. Fetch latest release branch:**
+```bash
+git fetch origin <RELEASE_BRANCH>
+```
+
+**2.5d. Create the worktree (named after the branch):**
+```bash
+WORKTREE_DIR="<main_root>/.worktrees/task/<task-code-lowercase>"
+```
+Check if the branch `task/<task-code-lowercase>` already exists:
 ```bash
 git branch --list "task/<task-code-lowercase>"
 ```
-- If exists: `git checkout task/<task-code-lowercase>`
-- If not: `git checkout -b task/<task-code-lowercase>`
+- If the branch exists: `git worktree add "$WORKTREE_DIR" task/<task-code-lowercase>`
+- If the branch does not exist: `git worktree add "$WORKTREE_DIR" -b task/<task-code-lowercase> origin/<RELEASE_BRANCH>`
+- If the worktree directory already exists (stale state), run `git worktree prune` first and retry.
+
+**2.5e. Switch to the worktree:**
+
+Change the working directory to `$WORKTREE_DIR`. Inform the user:
+
+> "Working in isolated worktree: `.worktrees/task/<task-code-lowercase>`
+> Branch: `task/<task-code-lowercase>` (based on `<RELEASE_BRANCH>`)
+> Main repository: `<main_root>`"
+
+**Important:** All subsequent steps (3 through 6) operate within the worktree directory. File paths, git commands, and script invocations all execute relative to the worktree root.
 
 ### Step 3: Read the full task details
 
@@ -303,6 +331,17 @@ gh issue close "$ISSUE_NUM" --repo "$TRACKER_REPO" --comment "Task completed. Qu
 Same as dual sync steps 1-2, skip GitHub sync.
 
 Inform the user: "Task [TASK-CODE] has been closed."
+
+**6c.5. Remove the task worktree:**
+
+After marking the task as done, automatically remove the worktree. Do NOT ask — this is always done:
+
+```bash
+cd <main_root>
+git worktree remove .worktrees/task/<task-code-lowercase> 2>/dev/null || git worktree remove --force .worktrees/task/<task-code-lowercase>
+```
+
+Inform the user: "Worktree `.worktrees/task/<task-code-lowercase>` removed. The task branch `task/<task-code-lowercase>` still exists for the PR. Use `/task-continue [TASK-CODE]` to re-enter a fresh worktree if needed."
 
 **6d. Ask to commit:**
 

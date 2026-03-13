@@ -26,6 +26,12 @@ If these values are not configured in CLAUDE.md, detect them from project config
 ### Test files:
 `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py find-files --patterns "*.test.*,*.spec.*,test_*,*_test.*" --max-depth 5 --limit 30`
 
+## Worktree Detection
+
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info`
+
+If `in_worktree` is `true`, all test execution happens in the worktree (source code isolation). Task management queries automatically use the main repository.
+
 ## Arguments
 
 The user invoked with: **$ARGUMENTS**

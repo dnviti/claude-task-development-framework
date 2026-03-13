@@ -40,6 +40,12 @@ If these values are not configured in CLAUDE.md, detect them from project config
 
 The user invoked with: **$ARGUMENTS**
 
+## Worktree Detection
+
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info`
+
+If `in_worktree` is `true`, all file creation/modification happens in the worktree (source code isolation). Task management queries automatically use the main repository.
+
 ## Project Architecture Awareness
 
 Before writing any tests, explore the project structure to understand:

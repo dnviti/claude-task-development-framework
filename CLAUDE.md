@@ -84,6 +84,25 @@ Tasks and ideas support three operating modes, controlled by `.claude/issues-tra
 
 The `platform` field (`"github"` or `"gitlab"`) determines which CLI tool (`gh` or `glab`) is used. If omitted, defaults to `"github"`.
 
+### Worktree-Based Task Isolation
+
+Tasks are developed in isolated git worktrees instead of branch switching, enabling parallel task work:
+
+| Concept | Location |
+|---------|----------|
+| Worktree directory | `.worktrees/task/<code-lowercase>/` (mirrors branch name) |
+| Branch naming | `task/<code-lowercase>` |
+| Task files | Always in main repository root |
+| Source code | In the worktree directory |
+
+**Lifecycle:**
+- `/task-pick` creates a worktree when a task is picked up
+- When a task is closed (marked done), the worktree is **automatically removed**
+- `/task-continue` creates a **fresh worktree** from the existing branch (since the old one was dismissed at close)
+- `task_manager.py` always reads/writes task files from the main repo root via `get_main_repo_root()`
+- `/release` and `/env-setup` should be run from the main repository
+- `.worktrees/` must be in `.gitignore`
+
 ## Cross-Platform Notes
 
 This framework supports **Windows, macOS, and Linux** with automatic OS detection.

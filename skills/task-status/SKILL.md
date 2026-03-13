@@ -22,6 +22,12 @@ Supported operations: `list-issues`, `search-issues`, `view-issue`, `edit-issue`
 
 Example: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py platform-cmd create-issue title="[CODE] Title" body="Description" labels="task,status:todo"`
 
+## Worktree Detection
+
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info`
+
+If invoked from a worktree, the report still covers the entire project state (main repo task files + all worktrees). Task management queries automatically use the main repository root.
+
 ---
 
 ## Platform-Only Mode
@@ -148,7 +154,22 @@ Present the information above as a structured English-language report with these
    - Local status vs. platform status
    - Suggested action (e.g., "run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py move CODE --to STATUS`")
 
-6. **Release Plan Overview** — Check if release planning is active:
+6. **Active Worktrees** — List all active task worktrees:
+
+   Run `git worktree list` and present a table of worktrees under `.worktrees/`:
+
+   | Worktree | Branch | Task | Status |
+   |----------|--------|------|--------|
+   | `.worktrees/task/<code>` | `task/<code>` | TASK-CODE | in-progress |
+
+   Cross-reference with in-progress tasks to identify:
+   - Tasks that have active worktrees
+   - Tasks that are in-progress but have no worktree (branch-only)
+   - Worktrees for branches that are not associated with any known task
+
+   If no worktrees exist, skip this section.
+
+7. **Release Plan Overview** — Check if release planning is active:
    - Run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/release_manager.py release-plan-list`
    - If no `releases.json` exists (error or empty result), skip this section entirely.
    - If releases exist, show:

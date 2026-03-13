@@ -26,6 +26,16 @@ You are a documentation manager for this project. Your job is to create, update,
 ### Recently completed tasks:
 `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py list --status done --format summary`
 
+## Worktree Detection
+
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info`
+
+If `in_worktree` is `true`, all file creation/modification happens in the worktree (source code isolation). Task management queries automatically use the main repository.
+
+**Notes for specific operations:**
+- **sync**: Task file synchronization (`to-do.txt`, `progressing.txt`, `done.txt`) always targets the main repository root. Documentation updates (`CLAUDE.md`, `docs/`) are applied to the working directory (which may be a worktree).
+- **claude-md**: If in a worktree, CLAUDE.md changes are made in the worktree. To apply to the main repository, commit and cherry-pick, or run this operation from the main repository.
+
 ## Arguments
 
 The user invoked: **$ARGUMENTS**

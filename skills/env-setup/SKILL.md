@@ -44,6 +44,23 @@ This skill requires user confirmation before applying changes. At each `AskUserQ
 ### Existing git tags:
 `git tag -l 2>&1 | tail -5 || echo "(no tags)"`
 
+## Worktree Detection
+
+`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/task_manager.py worktree-info`
+
+If `in_worktree` is `true`, CLAUDE.md and project config should typically be updated in the **main repository**, not the worktree.
+
+Warn the user:
+
+> "You are in a worktree. CLAUDE.md and project config should be updated in the main repository."
+
+Use `AskUserQuestion` with options:
+- **"Switch to main repo"** — change the working directory to `main_root` and continue
+- **"Update in worktree instead"** — proceed in the worktree (changes will need to be manually propagated)
+- **"Cancel"** — abort
+
+STOP HERE after calling `AskUserQuestion`. Do NOT proceed until the user responds.
+
 ## Arguments
 
 The user invoked with: **$ARGUMENTS**
