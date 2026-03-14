@@ -354,10 +354,10 @@ def _get_platform_placeholders(platform: str) -> dict:
                 '  --description "## Task <TASK-CODE> — <Task Title>\n\n'
                 '### Summary\n<brief list of what was created/modified>\n\n'
                 '### Verify Command Result\n<PASS or FAIL with details>\n\n'
+                '### Testing Guide\n<concrete numbered steps to manually verify the implementation>\n\n'
                 '### Related Issue\nRefs #<ISSUE_NUM> (<TASK-CODE>)\n\n'
                 '---\n*Implemented autonomously by Agentic Fleet*"'
             ),
-            "{{COMMENT_MR_CMD}}": 'glab mr note <MR_IID> -m "## Testing Guide\n<concrete steps to manually verify the implementation>"',
             "{{RELEASE_BRANCH}}": "develop",
         }
     else:
@@ -374,10 +374,10 @@ def _get_platform_placeholders(platform: str) -> dict:
                 '  --body "## Task <TASK-CODE> — <Task Title>\n\n'
                 '### Summary\n<brief list of what was created/modified>\n\n'
                 '### Verify Command Result\n<PASS or FAIL with details>\n\n'
+                '### Testing Guide\n<concrete numbered steps to manually verify the implementation>\n\n'
                 '### Related Issue\nRefs #<ISSUE_NUM> (<TASK-CODE>)\n\n'
                 '---\n*Implemented autonomously by Agentic Fleet*"'
             ),
-            "{{COMMENT_MR_CMD}}": 'gh pr comment <PR_NUMBER> --body "## Testing Guide\n<concrete steps to manually verify the implementation>"',
             "{{RELEASE_BRANCH}}": "develop",
         }
 
