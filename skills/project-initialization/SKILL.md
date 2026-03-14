@@ -448,11 +448,13 @@ STOP HERE after calling `AskUserQuestion`. Do NOT proceed until the user respond
      - **GitHub:** Copy `${CLAUDE_PLUGIN_ROOT}/templates/github/workflows/agentic-fleet.yml` to `.github/workflows/agentic-fleet.yml`
      - **GitLab:** Copy `${CLAUDE_PLUGIN_ROOT}/templates/gitlab/agentic-fleet.gitlab-ci.yml` to the project root
    - **If Task Implementation selected:**
-     - **GitHub:** Copy `${CLAUDE_PLUGIN_ROOT}/templates/github/workflows/agentic-task.yml` to `.github/workflows/agentic-task.yml`
-     - **GitLab:** Copy `${CLAUDE_PLUGIN_ROOT}/templates/gitlab/agentic-task.gitlab-ci.yml` to the project root
      - Ask for cron interval using `AskUserQuestion`: "Every 4 hours" / "Every 6 hours" / "Every 8 hours" / "Every 12 hours" / "Every 24 hours" / "Custom"
      - STOP and wait for response.
-     - Instruct the user to create the `AGENTIC_TASK_CRON` repository variable with the selected cron value.
+     - **GitHub:** Copy `${CLAUDE_PLUGIN_ROOT}/templates/github/workflows/agentic-task.yml` to `.github/workflows/agentic-task.yml`, then replace the cron placeholder with the selected value:
+       ```bash
+       sed -i 's|__AGENTIC_TASK_CRON__|<selected cron expression>|' .github/workflows/agentic-task.yml
+       ```
+     - **GitLab:** Copy `${CLAUDE_PLUGIN_ROOT}/templates/gitlab/agentic-task.gitlab-ci.yml` to the project root
    - If `.gitlab-ci.yml` already exists, instruct the user to add `include:` directives for the new file(s).
    - Warn: "⚠️ Add `ANTHROPIC_API_KEY` as a repository secret (GitHub) or CI/CD masked variable (GitLab)."
 

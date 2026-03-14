@@ -278,7 +278,11 @@ Based on the detected platform and selected pipelines:
   mkdir -p .github/workflows
   ```
   - If Idea Scout selected: `cp ${CLAUDE_PLUGIN_ROOT}/templates/github/workflows/agentic-fleet.yml .github/workflows/agentic-fleet.yml`
-  - If Task Implementation selected: `cp ${CLAUDE_PLUGIN_ROOT}/templates/github/workflows/agentic-task.yml .github/workflows/agentic-task.yml`
+  - If Task Implementation selected:
+    ```bash
+    cp ${CLAUDE_PLUGIN_ROOT}/templates/github/workflows/agentic-task.yml .github/workflows/agentic-task.yml
+    sed -i 's|__AGENTIC_TASK_CRON__|<selected cron expression>|' .github/workflows/agentic-task.yml
+    ```
 
 - **GitLab:**
   - If Idea Scout selected: `cp ${CLAUDE_PLUGIN_ROOT}/templates/gitlab/agentic-fleet.gitlab-ci.yml .`
@@ -325,11 +329,14 @@ Present a summary to the user:
 ### Required Configuration
 ⚠️  **Secret:** Add `ANTHROPIC_API_KEY` as a [repository secret (GitHub) / CI/CD masked variable (GitLab)].
 
-[If Task Implementation was selected:]
-⚠️  **Repository Variable:** Add `AGENTIC_TASK_CRON` with value `[selected cron expression]`:
-  - GitHub: Settings → Secrets and variables → Actions → Variables tab → New repository variable
-  - GitLab: Settings → CI/CD → Variables → Add variable (uncheck "Protect" and "Mask")
-  Alternatively, for GitLab: create a Pipeline Schedule directly (CI/CD → Schedules).
+[If Task Implementation was selected on GitHub:]
+The cron schedule `[selected cron expression]` has been written directly into `.github/workflows/agentic-task.yml`.
+To change it later, edit the `cron:` line in that file.
+
+[If Task Implementation was selected on GitLab:]
+⚠️  **Pipeline Schedule:** Create a CI/CD Pipeline Schedule with the desired cron expression:
+  - GitLab: CI/CD → Schedules → New schedule
+  Alternatively, add `AGENTIC_TASK_CRON` as a CI/CD variable (uncheck "Protect" and "Mask").
 
 ### How It Works
 1. **Build Memory** — Python script generates a structural codebase summary
