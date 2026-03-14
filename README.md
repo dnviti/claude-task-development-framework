@@ -7,7 +7,7 @@ CTDF gives your AI-assisted development workflow a structured backbone: ideas ar
 ## Features
 
 - **Two-pipeline workflow** — separate idea evaluation from task execution
-- **22 built-in skills** — slash commands for every stage of the development lifecycle
+- **23 built-in skills** — slash commands for every stage of the development lifecycle
 - **Claude Code plugin** — install via marketplace, uninstall cleanly, update easily
 - **Adaptive project initialization** — `/project-initialization` scaffolds your project and tailors all skills to your chosen stack, domain, and architecture
 - **Plain-text tracking** — tasks and ideas live in simple `.txt` files, fully version-controllable
@@ -102,6 +102,7 @@ to-do.txt [ ]  ──→  progressing.txt [~]  ──→  done.txt [x]
 | Skill | Usage | Description |
 |-------|-------|-------------|
 | `/setup` | `/setup [project name]` | Initialize task/idea tracking files in an existing project |
+| `/update` | `/update [category]` | Update CTDF-managed files (pipelines, scripts, prompts, skills, CLAUDE.md) to the latest plugin version |
 | `/project-initialization` | `/project-initialization [purpose]` | Full project scaffold: choose stack, configure git, adapt all skills |
 | `/env-setup` | `/env-setup` | Scan project to detect tech stack, dependencies, and commands; update CLAUDE.md |
 
@@ -283,8 +284,9 @@ claude-task-development-framework/
 ├── .claude-plugin/
 │   ├── plugin.json              # Plugin manifest
 │   └── marketplace.json         # Marketplace definition
-├── skills/                      # 22 Claude Code skills
+├── skills/                      # 23 Claude Code skills
 │   ├── setup/                   # Initialize task tracking in a project
+│   ├── update/                  # Update CTDF-managed files to latest plugin version
 │   ├── project-initialization/  # Full project scaffolding
 │   ├── env-setup/               # Detect tech stack and update CLAUDE.md
 │   ├── task-create/             # Create tasks
@@ -350,6 +352,11 @@ claude-task-development-framework/
 # Update the plugin
 /plugin update ctdf@dnviti-claude-task-development-framework
 
+# After updating the plugin, refresh CTDF-managed files in your project
+/update
+```
+
+```bash
 # Disable temporarily
 /plugin disable ctdf@dnviti-claude-task-development-framework
 
