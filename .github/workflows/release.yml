@@ -11,6 +11,7 @@ on:
       - "templates/**"
       - "hooks/**"
       - "CLAUDE.md"
+  workflow_dispatch:
 
 permissions:
   contents: write
