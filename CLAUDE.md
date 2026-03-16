@@ -104,7 +104,7 @@ Tasks are developed in isolated git worktrees instead of branch switching, enabl
 - When a task is closed (marked done), the worktree is **automatically removed**
 - `/task continue` creates a **fresh worktree** from the existing branch (since the old one was dismissed at close)
 - `task_manager.py` always reads/writes task files from the main repo root via `get_main_repo_root()`
-- `/release-start` and `/setup env` should be run from the main repository
+- `/release` and `/setup env` should be run from the main repository
 - `.worktrees/` must be in `.gitignore`
 
 ## Cross-Platform Notes

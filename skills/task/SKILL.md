@@ -2,7 +2,7 @@
 name: task
 description: "Unified task management: pick up, create, continue, or check status of project tasks."
 disable-model-invocation: true
-argument-hint: "[pick [CODE]] [create [description]] [continue [CODE]] [status]"
+argument-hint: "[pick [CODE | all [sequential]]] [create [description | all [sequential]]] [continue [CODE | all [sequential]]] [schedule CODE [CODE2...] to X.X.X] [status] [yolo]"
 ---
 
 # Task Manager
@@ -28,7 +28,9 @@ Task files (`to-do.txt`, `progressing.txt`, `done.txt`) always live in `main_roo
 
 ## Argument Dispatch
 
-`SH dispatch --skill task --args "$ARGUMENTS"` → routes to: `pick`, `create`, `continue`, or `status` flow.
+`SH dispatch --skill task --args "$ARGUMENTS"` → routes to: `pick`, `pick-all`, `create`, `create-all`, `continue`, `continue-all`, `schedule`, or `status` flow.
+
+Also returns `yolo: true/false`. When `yolo` is `true`, **auto-select the recommended (first) option at every GATE** without waiting for user input. Log each auto-selected choice. Yolo never auto-selects destructive or cancel options.
 
 ---
 
@@ -50,7 +52,7 @@ Returns pre-computed: `summary` counts, `in_progress` tasks, `blocked` tasks, `n
 
 1. **Summary** — Table with counts by status (completed, in-progress, to-test, todo, blocked) and progress percentage.
 2. **In-Progress Tasks** — Task code, title, priority, what remains, files involved.
-3. **To-Test Tasks** — Task code, title, testing pending. Suggest `/release-start test-only TASK-CODE`.
+3. **To-Test Tasks** — Task code, title, testing pending. Suggest `/release test-only TASK-CODE`.
 4. **Next Recommended** — Top 2-3 from `next_recommended`: code, title, priority, dependency status, brief scope.
 5. **Blocked Tasks** — If any, list with blocking reason.
 6. **Sync Discrepancies** — Dual-sync only. Task code, issue number, local vs platform status, suggested action.
@@ -188,7 +190,102 @@ Use `AskUserQuestion`: **"Yes, create PR into <DEVELOPMENT_BRANCH>"** | **"No, s
 
 **PR creation:** Push with `-u`, check existing PR via `platform-cmd list-pr` (skip if exists). Build PR: title, summary, issue ref (platform modes). Create via `platform-cmd create-pr`. Report URL.
 
-**If testing was skipped:** Do NOT offer PR. Inform: "Branch NOT submitted as PR. Run `/release-start test-only [TASK-CODE]` to complete testing."
+**If testing was skipped:** Do NOT offer PR. Inform: "Branch NOT submitted as PR. Run `/release test-only [TASK-CODE]` to complete testing."
+
+---
+
+## Pick All Flow
+
+Pick up and implement **all pending tasks for the current active release**. By default, tasks are implemented **in parallel** using subagents (one agent per task). Use `/task pick all sequential` to implement tasks one at a time instead.
+
+This flow is triggered by `/task pick all` or `/task pick all sequential`.
+
+### Pick All — Release Detection
+
+Detect the active release:
+
+```bash
+RM release-state-get
+```
+
+- If **no active release:** inform user: "No active release found. Run `/release X.X.X` first to create a release, then re-run `/task pick all`." **STOP.**
+- Extract version from `release_state.version`.
+
+### Pick All — Task Discovery
+
+```bash
+TM list-release-tasks --version X.X.X
+```
+
+Filter to only `todo` and `progressing` tasks. If none pending → "All tasks for release X.X.X are already complete. You can resume the release with `/release resume`." **STOP.**
+
+### Pick All Instructions
+
+#### Step 1: Build dependency graph
+
+Parse `Dependencies:` fields from each pending task. Group independent tasks (no unmet dependencies) into parallel batches. Tasks whose dependencies are not yet done go into later batches.
+
+#### Step 2: Present the plan
+
+Present: "Found **N pending tasks** for release X.X.X. **M can run in parallel** in batch 1."
+
+| Batch | Tasks | Notes |
+|-------|-------|-------|
+| 1 | CODE1, CODE2 | Independent |
+| 2 | CODE3 | Depends on CODE1 |
+
+**Default (parallel):** GATE: "Spawn agents to implement all tasks" / "Cancel"
+
+**Sequential mode (`/task pick all sequential`):** GATE: "Implement tasks one by one" / "Cancel"
+
+#### Step 3a: Parallel execution (default)
+
+For each batch, spawn Agent subagents with `isolation: "worktree"` and `mode: "bypassPermissions"`:
+
+```
+prompt: "You are a task implementation agent. Implement task {CODE} for release {VERSION}.
+
+1. Mark task as in-progress: `TM move {CODE} --to progressing`
+2. Create worktree: `SH setup-task-worktree --task-code {CODE} --base-branch {DEVELOPMENT_BRANCH}`
+3. Read full task details: `TM parse {CODE}`
+4. Explore the codebase: read all files listed in Files involved and related code
+5. Implement the task according to DESCRIPTION and TECHNICAL DETAILS
+6. Create/modify files as specified in Files involved
+7. Run {VERIFY_COMMAND} — on failure, fix and retry (max 3 attempts)
+8. Commit: `git add <changed files> && git commit -m 'feat: {description} ({CODE})'`
+9. Mark task as done: `TM move {CODE} --to done --completed-summary 'Implemented: {title}'`
+10. Remove worktree: `TM remove-worktree --task-code {CODE}`
+
+Report: {{ code, success, summary, files_changed[], error_if_any }}"
+```
+
+Wait for **all agents in the current batch** to complete before proceeding to the next batch.
+
+#### Step 3b: Sequential execution (`/task pick all sequential`)
+
+For each task in dependency order, execute the standard **Pick Flow** (from Step 1 through Step 6) one at a time. Wait for user confirmation at each task's closing gate before moving to the next.
+
+#### Step 4: Present batch results
+
+| Code | Title | Result |
+|------|-------|--------|
+| CODE1 | Title | Success |
+| CODE2 | Title | Failed (reason) |
+
+Update completed tasks. Move to next batch if any remain (repeat from Step 3a/3b).
+
+#### Step 5: Handle failures
+
+On failures → GATE: "Retry failed tasks" / "Skip failed tasks" / "Cancel"
+
+#### Step 6: Final summary
+
+When all batches complete, present:
+
+> **All N tasks for release X.X.X have been implemented.**
+> Successful: M | Failed: K | Skipped: J
+>
+> You can now resume the release pipeline with `/release resume`.
 
 ---
 
@@ -276,6 +373,70 @@ Read section headers from `to-do.txt` (local/dual) or label mappings (platform-o
 
 ---
 
+## Create All Flow
+
+Create tasks from **all pending ideas** in `ideas.txt` in one batch. By default, tasks are created **in parallel** using subagents (one agent per idea). Use `/task create all sequential` to process ideas one at a time instead.
+
+### Create All — Idea Discovery
+
+```bash
+TM list --status idea --format summary
+TM sections --file ideas.txt
+```
+
+**Platform-only:** `platform-cmd list-issues labels="idea,status:pending" state="open"`
+
+If no pending ideas → "No pending ideas found in ideas.txt. Use `/idea create` to add ideas first." **STOP.**
+
+### Create All Instructions
+
+#### Step 1: Present the plan
+
+Present: "Found **N pending ideas** to convert into tasks."
+
+| # | Idea Code | Title |
+|---|-----------|-------|
+| 1 | IDEA-XXX-0001 | Title |
+| 2 | IDEA-YYY-0002 | Title |
+
+GATE: "Create tasks from all ideas" / "Cancel"
+
+#### Step 2a: Parallel execution (default)
+
+For each idea, spawn Agent subagents with `isolation: "worktree"` and `mode: "bypassPermissions"`:
+
+```
+prompt: "You are a task creation agent. Convert idea {IDEA_CODE} into a fully specified task.
+
+1. Read the idea details: `TM parse {IDEA_CODE}`
+2. Explore the codebase to understand scope, existing patterns, and relevant files
+3. Determine task code prefix and next number: `TM next-id --type task`
+4. Draft a task block with: Priority, Dependencies, DESCRIPTION (4-10 lines), TECHNICAL DETAILS (structured by architecture), Files involved (CREATE/MODIFY)
+5. Insert the task into to-do.txt: use the Edit tool at the correct section
+6. Move the idea from ideas.txt to idea-disapproved.txt (approved): `TM move {IDEA_CODE} --to approved`
+7. Report: {{ idea_code, task_code, title, priority, files_count }}"
+```
+
+#### Step 2b: Sequential execution (`/task create all sequential`)
+
+For each idea in order, execute the standard **Create Flow** one at a time. Wait for user confirmation at each task's draft gate before moving to the next.
+
+#### Step 3: Present results
+
+| Idea Code | Task Code | Title | Result |
+|-----------|-----------|-------|--------|
+| IDEA-XXX-0001 | AUTH-0005 | Title | Created |
+| IDEA-YYY-0002 | — | Title | Failed (reason) |
+
+On failures → GATE: "Retry failed" / "Skip failed" / "Cancel"
+
+#### Step 4: Final summary
+
+> **Created N tasks from M ideas.**
+> Successful: K | Failed: J | Skipped: L
+
+---
+
 ## Continue Flow
 
 Resume work on an in-progress task. Does NOT close or commit — use Pick Flow for that.
@@ -329,6 +490,115 @@ Read all related files: those to be modified, similar files for patterns, relate
 6. **Quality Gate Reminder**: Verify command must pass before closing via `/task pick`
 
 Ask: "Ready to continue implementation, or would you like to adjust the approach?"
+
+---
+
+## Continue All Flow
+
+Resume work on **all in-progress tasks** simultaneously. By default, tasks are continued **in parallel** using subagents (one agent per task). Use `/task continue all sequential` to process tasks one at a time instead.
+
+### Continue All — Task Discovery
+
+```bash
+TM list --status progressing --format summary
+```
+
+**Platform-only:** `platform-cmd list-issues labels="task,status:in-progress" state="open"`
+
+If no in-progress tasks → "No in-progress tasks found. Use `/task pick` to pick up a task first." **STOP.**
+
+### Continue All Instructions
+
+#### Step 1: Present the plan
+
+Present: "Found **N in-progress tasks** to continue."
+
+| # | Code | Title | Priority |
+|---|------|-------|----------|
+| 1 | CODE1 | Title | HIGH |
+| 2 | CODE2 | Title | MEDIUM |
+
+GATE: "Spawn agents to continue all tasks" / "Cancel"
+
+#### Step 2a: Parallel execution (default)
+
+For each in-progress task, spawn Agent subagents with `isolation: "worktree"` and `mode: "bypassPermissions"`:
+
+```
+prompt: "You are a task continuation agent. Continue implementing task {CODE}.
+
+1. Create or enter worktree: `SH setup-task-worktree --task-code {CODE} --base-branch {DEVELOPMENT_BRANCH}`
+2. Read full task details: `TM parse {CODE}`
+3. Assess current implementation state: check which files exist, what's done vs remaining
+4. Explore related code for patterns and context
+5. Implement remaining work according to DESCRIPTION and TECHNICAL DETAILS
+6. Run {VERIFY_COMMAND} — on failure, fix and retry (max 3 attempts)
+7. Commit: `git add <changed files> && git commit -m 'feat: {description} ({CODE})'`
+8. Mark task as done: `TM move {CODE} --to done --completed-summary 'Completed: {title}'`
+9. Remove worktree: `TM remove-worktree --task-code {CODE}`
+
+Report: {{ code, success, summary, files_changed[], error_if_any }}"
+```
+
+#### Step 2b: Sequential execution (`/task continue all sequential`)
+
+For each task in priority order, execute the standard **Continue Flow** one at a time. Wait for user direction before moving to the next.
+
+#### Step 3: Present results
+
+| Code | Title | Result |
+|------|-------|--------|
+| CODE1 | Title | Completed |
+| CODE2 | Title | Failed (reason) |
+
+On failures → GATE: "Retry failed tasks" / "Skip failed tasks" / "Cancel"
+
+#### Step 4: Final summary
+
+> **Continued N in-progress tasks.**
+> Completed: M | Failed: K | Skipped: J
+
+---
+
+## Schedule Flow
+
+Assign one or more tasks to a release milestone.
+
+### Schedule Flow Instructions
+
+#### Step 1: Parse arguments
+
+From dispatch: `task_code` contains comma-separated codes, `remaining_args` contains version.
+
+- If task codes missing → GATE: "Which task(s) to schedule? Enter codes separated by spaces."
+- If version missing → list available releases with `RM release-plan-list` and ask. If no releases exist → suggest `/release create X.X.X` first. Stop.
+
+#### Step 2: Validate release exists
+
+```bash
+RM release-plan-list
+```
+
+If version not found → GATE: "Release X.X.X does not exist. Create it with `/release create X.X.X`?" / "Cancel"
+
+#### Step 3: Schedule tasks
+
+```bash
+TM schedule-tasks --codes "CODE1,CODE2" --version X.X.X
+```
+
+In platform modes, also add `release:vX.X.X` label and milestone via `PM edit-issue`.
+
+#### Step 4: Report
+
+Present results table:
+
+| Code | Title | Result |
+|------|-------|--------|
+| CODE1 | Title | Scheduled to X.X.X |
+| CODE2 | Title | Failed (reason) |
+
+Suggest: "Start the release with `/release continue X.X.X`" or "Schedule more tasks with `/task schedule`."
 
 ---
 

@@ -1,0 +1,524 @@
+#!/usr/bin/env python3
+"""Documentation manager CLI for CTDF.
+
+Provides deterministic operations for documentation lifecycle:
+discover codebase structure, track staleness via manifest hashes,
+detect static site generators, and clean generated docs.
+
+All output is JSON. Zero external dependencies (stdlib only).
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+# ── Imports from sibling modules ───────────────────────────────────────────
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
+from analyzers import (  # noqa: E402
+    classify_all_files,
+    detect_frameworks,
+    detect_languages,
+    load_gitignore_patterns,
+    walk_source_files,
+)
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+def get_main_repo_root() -> Path:
+    """Return the main git repo root (not a worktree)."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True,
+        )
+        top = Path(result.stdout.strip())
+        common = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, check=True, cwd=top,
+        )
+        common_dir = Path(common.stdout.strip())
+        if common_dir.is_absolute():
+            return common_dir.parent
+        return (top / common_dir).resolve().parent
+    except (subprocess.CalledProcessError, OSError):
+        return Path.cwd()
+
+
+DOCS_DIR_NAME = "docs"
+MANIFEST_NAME = ".docs-manifest.json"
+
+# Standard documentation sections
+SECTIONS = [
+    {"name": "index", "file": "index.md", "title": "Documentation Index",
+     "description": "Landing page, table of contents, project summary"},
+    {"name": "architecture", "file": "architecture.md", "title": "Architecture",
+     "description": "System architecture, components, data flow (Mermaid diagrams)"},
+    {"name": "getting-started", "file": "getting-started.md", "title": "Getting Started",
+     "description": "Installation, prerequisites, first run"},
+    {"name": "configuration", "file": "configuration.md", "title": "Configuration",
+     "description": "Environment variables, config files, feature flags"},
+    {"name": "api-reference", "file": "api-reference.md", "title": "API Reference",
+     "description": "Endpoints, functions, CLI commands"},
+    {"name": "deployment", "file": "deployment.md", "title": "Deployment",
+     "description": "Build, Docker, CI/CD, production setup"},
+    {"name": "development", "file": "development.md", "title": "Development",
+     "description": "Contributing, local dev, testing, branch strategy"},
+    {"name": "troubleshooting", "file": "troubleshooting.md", "title": "Troubleshooting",
+     "description": "Common errors, debugging, FAQ"},
+    {"name": "llm-context", "file": "llm-context.md", "title": "LLM Context",
+     "description": "Consolidated single-file for LLM/bot consumption"},
+]
+
+
+def _hash_file(path: Path) -> str:
+    """Compute SHA-256 hash of a file."""
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return ""
+
+
+def _read_manifest(root: Path) -> dict:
+    """Read .docs-manifest.json from the docs directory."""
+    fp = root / DOCS_DIR_NAME / MANIFEST_NAME
+    if not fp.exists():
+        return {}
+    try:
+        return json.loads(fp.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _write_manifest(root: Path, manifest: dict) -> None:
+    """Write .docs-manifest.json to the docs directory."""
+    docs_dir = root / DOCS_DIR_NAME
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    fp = docs_dir / MANIFEST_NAME
+    with open(fp, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+        f.write("\n")
+
+
+# ── Subcommand: discover ───────────────────────────────────────────────────
+
+def cmd_discover(args):
+    """Scan the codebase and return structured JSON of what exists."""
+    root = get_main_repo_root()
+    gitignore = load_gitignore_patterns(root)
+
+    languages = detect_languages(root, gitignore)
+    frameworks = detect_frameworks(root)
+    file_roles = classify_all_files(root, gitignore)
+
+    # Count files per role
+    role_counts = {role: len(files) for role, files in file_roles.items()}
+
+    # Detect entry points
+    entry_points = []
+    for role in ("entry_point", "main", "server", "app"):
+        entry_points.extend(file_roles.get(role, []))
+
+    # Detect config files
+    config_files = file_roles.get("config", [])
+
+    # Detect test files
+    test_files = file_roles.get("test", [])
+
+    # Check for existing docs
+    docs_dir = root / DOCS_DIR_NAME
+    docs_exist = docs_dir.is_dir()
+    existing_sections = []
+    if docs_exist:
+        for section in SECTIONS:
+            fp = docs_dir / section["file"]
+            if fp.exists():
+                existing_sections.append(section["name"])
+
+    # Read manifest if present
+    manifest = _read_manifest(root)
+
+    # Read CLAUDE.md if present
+    claude_md = root / "CLAUDE.md"
+    has_claude_md = claude_md.exists()
+
+    # Detect README
+    readme = None
+    for name in ("README.md", "readme.md", "README.rst", "README.txt"):
+        if (root / name).exists():
+            readme = name
+            break
+
+    print(json.dumps({
+        "root": str(root),
+        "languages": languages,
+        "frameworks": frameworks,
+        "role_counts": role_counts,
+        "total_files": sum(role_counts.values()),
+        "entry_points": entry_points[:20],
+        "config_files": config_files[:20],
+        "test_files_count": len(test_files),
+        "docs_exist": docs_exist,
+        "existing_sections": existing_sections,
+        "has_manifest": bool(manifest),
+        "has_claude_md": has_claude_md,
+        "readme": readme,
+        "standard_sections": SECTIONS,
+    }, indent=2))
+
+
+# ── Subcommand: check-staleness ────────────────────────────────────────────
+
+def cmd_check_staleness(args):
+    """Compare current source file hashes against .docs-manifest.json."""
+    root = get_main_repo_root()
+    manifest = _read_manifest(root)
+
+    if not manifest:
+        print(json.dumps({
+            "has_manifest": False,
+            "sections": [],
+            "message": "No manifest found. Run /docs generate first.",
+        }))
+        return
+
+    sections_status = []
+    for section_entry in manifest.get("sections", []):
+        name = section_entry["name"]
+        doc_file = root / DOCS_DIR_NAME / section_entry["file"]
+        doc_exists = doc_file.exists()
+
+        changed_sources = []
+        for src in section_entry.get("source_files", []):
+            src_path = root / src["path"]
+            current_hash = _hash_file(src_path) if src_path.exists() else ""
+            if current_hash != src.get("hash", ""):
+                changed_sources.append({
+                    "path": src["path"],
+                    "old_hash": src.get("hash", ""),
+                    "current_hash": current_hash,
+                    "missing": not src_path.exists(),
+                })
+
+        if not doc_exists:
+            status = "missing"
+        elif changed_sources:
+            status = "stale"
+        else:
+            status = "current"
+
+        sections_status.append({
+            "name": name,
+            "file": section_entry["file"],
+            "status": status,
+            "changed_sources": changed_sources,
+        })
+
+    stale_count = sum(1 for s in sections_status if s["status"] == "stale")
+    missing_count = sum(1 for s in sections_status if s["status"] == "missing")
+
+    print(json.dumps({
+        "has_manifest": True,
+        "sections": sections_status,
+        "stale_count": stale_count,
+        "missing_count": missing_count,
+        "current_count": len(sections_status) - stale_count - missing_count,
+    }, indent=2))
+
+
+# ── Subcommand: list-sections ──────────────────────────────────────────────
+
+def cmd_list_sections(args):
+    """Return the list of doc sections with their status."""
+    root = get_main_repo_root()
+    docs_dir = root / DOCS_DIR_NAME
+    manifest = _read_manifest(root)
+
+    sections = []
+    for section in SECTIONS:
+        fp = docs_dir / section["file"]
+        exists = fp.exists()
+        size = fp.stat().st_size if exists else 0
+        in_manifest = any(
+            s["name"] == section["name"]
+            for s in manifest.get("sections", [])
+        )
+        sections.append({
+            **section,
+            "exists": exists,
+            "size": size,
+            "tracked": in_manifest,
+        })
+
+    print(json.dumps({
+        "docs_dir": str(docs_dir),
+        "docs_exist": docs_dir.is_dir(),
+        "sections": sections,
+    }, indent=2))
+
+
+# ── Subcommand: init-manifest ─────────────────────────────────────────────
+
+def cmd_init_manifest(args):
+    """Create or update .docs-manifest.json after generation."""
+    root = get_main_repo_root()
+
+    # Parse sections-json: [{"name": "...", "file": "...", "source_files": ["path1", ...]}]
+    try:
+        sections_data = json.loads(args.sections_json)
+    except json.JSONDecodeError as e:
+        print(json.dumps({"error": f"Invalid sections JSON: {e}"}))
+        sys.exit(1)
+
+    manifest_sections = []
+    for section in sections_data:
+        source_entries = []
+        for src_path in section.get("source_files", []):
+            fp = root / src_path
+            source_entries.append({
+                "path": src_path,
+                "hash": _hash_file(fp),
+            })
+        manifest_sections.append({
+            "name": section["name"],
+            "file": section["file"],
+            "source_files": source_entries,
+            "generated_at": datetime.now(timezone.utc).isoformat()
+                .replace("+00:00", "Z"),
+        })
+
+    manifest = {
+        "version": "1.0",
+        "generated_at": datetime.now(timezone.utc).isoformat()
+            .replace("+00:00", "Z"),
+        "sections": manifest_sections,
+    }
+
+    _write_manifest(root, manifest)
+    print(json.dumps({"success": True, "sections_count": len(manifest_sections)}))
+
+
+# ── Subcommand: clean ──────────────────────────────────────────────────────
+
+def cmd_clean(args):
+    """Remove all generated documentation files tracked in the manifest."""
+    root = get_main_repo_root()
+    docs_dir = root / DOCS_DIR_NAME
+    manifest = _read_manifest(root)
+
+    deleted = []
+
+    if manifest:
+        # Delete only tracked files
+        for section in manifest.get("sections", []):
+            fp = docs_dir / section["file"]
+            if fp.exists():
+                fp.unlink()
+                deleted.append(section["file"])
+        # Delete manifest itself
+        manifest_fp = docs_dir / MANIFEST_NAME
+        if manifest_fp.exists():
+            manifest_fp.unlink()
+            deleted.append(MANIFEST_NAME)
+    else:
+        # No manifest: delete all known section files
+        for section in SECTIONS:
+            fp = docs_dir / section["file"]
+            if fp.exists():
+                fp.unlink()
+                deleted.append(section["file"])
+
+    # Remove docs dir if empty
+    if docs_dir.is_dir() and not any(docs_dir.iterdir()):
+        docs_dir.rmdir()
+        deleted.append(DOCS_DIR_NAME + "/")
+
+    print(json.dumps({
+        "success": True,
+        "deleted": deleted,
+        "count": len(deleted),
+    }, indent=2))
+
+
+# ── Subcommand: detect-site-generator ──────────────────────────────────────
+
+SITE_GENERATORS = [
+    {"name": "MkDocs", "config": "mkdocs.yml",
+     "build": "mkdocs build", "serve": "mkdocs serve",
+     "ecosystem": "python"},
+    {"name": "Docusaurus", "config": "docusaurus.config.js",
+     "build": "npm run build", "serve": "npm run start",
+     "ecosystem": "node"},
+    {"name": "Docusaurus", "config": "docusaurus.config.ts",
+     "build": "npm run build", "serve": "npm run start",
+     "ecosystem": "node"},
+    {"name": "VitePress", "config": ".vitepress/config.ts",
+     "build": "npx vitepress build docs", "serve": "npx vitepress dev docs",
+     "ecosystem": "node"},
+    {"name": "VitePress", "config": ".vitepress/config.js",
+     "build": "npx vitepress build docs", "serve": "npx vitepress dev docs",
+     "ecosystem": "node"},
+    {"name": "Jekyll", "config": "_config.yml",
+     "build": "bundle exec jekyll build", "serve": "bundle exec jekyll serve",
+     "ecosystem": "ruby"},
+    {"name": "mdBook", "config": "book.toml",
+     "build": "mdbook build", "serve": "mdbook serve",
+     "ecosystem": "rust"},
+    {"name": "Sphinx", "config": "conf.py",
+     "build": "make html", "serve": "python -m http.server -d _build/html",
+     "ecosystem": "python"},
+]
+
+RECOMMENDATIONS = {
+    "node": {"name": "VitePress", "install": "npm add -D vitepress",
+             "reason": "Native Markdown + Mermaid support, fast, Node ecosystem"},
+    "python": {"name": "MkDocs Material", "install": "pip install mkdocs-material",
+               "reason": "Rich Markdown + Mermaid support, Python ecosystem"},
+    "rust": {"name": "mdBook", "install": "cargo install mdbook",
+             "reason": "Lightweight, Rust ecosystem native"},
+    "default": {"name": "MkDocs Material", "install": "pip install mkdocs-material",
+                "reason": "Universal Markdown support, Mermaid, search, rich theming"},
+}
+
+
+def cmd_detect_site_generator(args):
+    """Check for static site generators and return recommendations."""
+    root = get_main_repo_root()
+
+    detected = None
+    for gen in SITE_GENERATORS:
+        config_path = root / gen["config"]
+        if config_path.exists():
+            detected = {
+                "name": gen["name"],
+                "config_file": gen["config"],
+                "build_command": gen["build"],
+                "serve_command": gen["serve"],
+            }
+            break
+
+    # Determine ecosystem for recommendations
+    languages = detect_languages(root)
+    primary_eco = "default"
+    if languages:
+        top_lang = next(iter(languages))
+        eco_map = {
+            "JavaScript": "node", "TypeScript": "node",
+            "Python": "python", "Rust": "rust",
+        }
+        primary_eco = eco_map.get(top_lang, "default")
+
+    rec = RECOMMENDATIONS.get(primary_eco, RECOMMENDATIONS["default"])
+
+    print(json.dumps({
+        "detected": detected,
+        "has_generator": detected is not None,
+        "recommended": rec,
+        "primary_ecosystem": primary_eco,
+    }, indent=2))
+
+
+# ── Subcommand: diff-since-tag ─────────────────────────────────────────────
+
+def cmd_diff_since_tag(args):
+    """Return changed files since a given git tag."""
+    root = get_main_repo_root()
+    tag = args.tag
+
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", f"{tag}..HEAD"],
+            capture_output=True, text=True, check=True, cwd=root,
+        )
+        changed_files = [f for f in result.stdout.strip().splitlines() if f]
+    except subprocess.CalledProcessError:
+        changed_files = []
+
+    # Cross-reference with manifest to find affected sections
+    manifest = _read_manifest(root)
+    affected_sections = set()
+    if manifest:
+        for section in manifest.get("sections", []):
+            tracked_paths = {s["path"] for s in section.get("source_files", [])}
+            if tracked_paths & set(changed_files):
+                affected_sections.add(section["name"])
+
+    print(json.dumps({
+        "tag": tag,
+        "changed_files": changed_files,
+        "changed_count": len(changed_files),
+        "affected_sections": sorted(affected_sections),
+    }, indent=2))
+
+
+# ── CLI ────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="CTDF Documentation Manager",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    # discover
+    sub.add_parser("discover", help="Scan codebase and return structured data")
+
+    # check-staleness
+    sub.add_parser("check-staleness",
+                   help="Compare source hashes against manifest")
+
+    # list-sections
+    sub.add_parser("list-sections", help="List doc sections with status")
+
+    # init-manifest
+    p = sub.add_parser("init-manifest",
+                       help="Create/update .docs-manifest.json")
+    p.add_argument("--sections-json", required=True,
+                   help="JSON array of section data")
+
+    # clean
+    sub.add_parser("clean", help="Remove all generated doc files")
+
+    # detect-site-generator
+    sub.add_parser("detect-site-generator",
+                   help="Check for static site generators")
+
+    # diff-since-tag
+    p = sub.add_parser("diff-since-tag",
+                       help="Return changed files since a git tag")
+    p.add_argument("--tag", required=True, help="Git tag to diff from")
+
+    args = parser.parse_args()
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    cmd_map = {
+        "discover": cmd_discover,
+        "check-staleness": cmd_check_staleness,
+        "list-sections": cmd_list_sections,
+        "init-manifest": cmd_init_manifest,
+        "clean": cmd_clean,
+        "detect-site-generator": cmd_detect_site_generator,
+        "diff-since-tag": cmd_diff_since_tag,
+    }
+
+    cmd_map[args.command](args)
+
+
+if __name__ == "__main__":
+    main()

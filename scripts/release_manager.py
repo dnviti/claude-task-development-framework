@@ -702,6 +702,135 @@ def cmd_release_plan_mark_released(args):
     print(json.dumps({"success": True, "version": version, "released_at": target["released_at"]}))
 
 
+# ── Subcommand: release-generate ───────────────────────────────────────────
+
+def cmd_release_generate(args):
+    """Analyze non-done tasks and return grouped data for roadmap generation."""
+    if not _uses_local_files():
+        print(json.dumps({"error": "releases.json is not used in platform-only mode."}))
+        sys.exit(1)
+
+    root = get_main_repo_root()
+
+    # Collect all non-done tasks from to-do.txt and progressing.txt
+    all_tasks = []
+    for fname, status_key in [("to-do.txt", "todo"), ("progressing.txt", "progressing")]:
+        fp = root / fname
+        if not fp.exists():
+            continue
+        content = fp.read_text(encoding="utf-8")
+        current_code = None
+        current_title = None
+        current_priority = ""
+        current_deps = "None"
+        current_release = None
+        for line in content.splitlines():
+            stripped = line.strip()
+            m = re.match(
+                r"^\[.\]\s+([A-Z]{3,5}-\d{4})\s+\u2014\s+(.+)$", stripped
+            )
+            if m:
+                if current_code:
+                    all_tasks.append({
+                        "code": current_code, "title": current_title,
+                        "status": status_key, "prefix": current_code.split("-")[0],
+                        "priority": current_priority, "dependencies": current_deps,
+                        "release": current_release,
+                    })
+                current_code = m.group(1)
+                current_title = m.group(2).strip()
+                current_priority = ""
+                current_deps = "None"
+                current_release = None
+            elif current_code:
+                if stripped.startswith("Priority:"):
+                    current_priority = stripped.split(":", 1)[1].strip()
+                elif stripped.startswith("Dependencies:"):
+                    current_deps = stripped.split(":", 1)[1].strip()
+                elif stripped.startswith("Release:"):
+                    current_release = stripped.split(":", 1)[1].strip()
+        if current_code:
+            all_tasks.append({
+                "code": current_code, "title": current_title,
+                "status": status_key, "prefix": current_code.split("-")[0],
+                "priority": current_priority, "dependencies": current_deps,
+                "release": current_release,
+            })
+
+    # Group by prefix
+    groups = {}
+    for t in all_tasks:
+        groups.setdefault(t["prefix"], []).append(t)
+
+    # Unassigned tasks (no release set)
+    unassigned = [t for t in all_tasks if not t["release"] or t["release"] == "None"]
+
+    # Existing releases
+    existing = _read_releases()
+
+    print(json.dumps({
+        "pending_tasks": all_tasks,
+        "task_count": len(all_tasks),
+        "unassigned_count": len(unassigned),
+        "unassigned": [t["code"] for t in unassigned],
+        "groups": {k: [t["code"] for t in v] for k, v in groups.items()},
+        "existing_releases": [{"version": r["version"], "status": r["status"],
+                               "task_count": len(r.get("tasks", []))}
+                              for r in existing],
+    }, indent=2))
+
+
+# ── Subcommand: release-close ──────────────────────────────────────────────
+
+def cmd_release_close(args):
+    """Check release readiness and return status summary for closing."""
+    if not _uses_local_files():
+        print(json.dumps({"error": "releases.json is not used in platform-only mode."}))
+        sys.exit(1)
+
+    releases = _read_releases()
+    version = args.version.lstrip("v")
+
+    target = None
+    for rel in releases:
+        if rel["version"] == version:
+            target = rel
+            break
+    if target is None:
+        print(json.dumps({"error": f"Release {version} not found"}))
+        sys.exit(1)
+
+    # Cross-reference task statuses
+    root = get_main_repo_root()
+    task_statuses = {}
+    for fname, status in [("to-do.txt", "todo"), ("progressing.txt", "progressing"),
+                          ("done.txt", "done")]:
+        fp = root / fname
+        if not fp.exists():
+            continue
+        content = fp.read_text(encoding="utf-8")
+        for line in content.splitlines():
+            m = re.match(r"^\[.\]\s+([A-Z]{3,5}-\d{4})\s+\u2014", line.strip())
+            if m:
+                task_statuses[m.group(1)] = status
+
+    tasks = target.get("tasks", [])
+    pending = []
+    for t in tasks:
+        st = task_statuses.get(t, "not-found")
+        if st != "done":
+            pending.append({"code": t, "status": st})
+
+    print(json.dumps({
+        "version": version,
+        "release_status": target["status"],
+        "all_tasks_done": len(pending) == 0,
+        "total_tasks": len(tasks),
+        "done_tasks": len(tasks) - len(pending),
+        "pending_tasks": pending,
+    }, indent=2))
+
+
 # ── Subcommand: release-state-get ──────────────────────────────────────────
 
 def cmd_release_state_get(args):
@@ -1254,6 +1383,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--increment-loop", action="store_true", help="Increment loop_count by 1")
     p.add_argument("--mark-gate-approved", type=int, default=None, help="Stage number to mark as approved")
     p.set_defaults(func=cmd_release_state_set)
+
+    # release-generate
+    p = sub.add_parser("release-generate", help="Analyze non-done tasks and return grouped data for roadmap generation")
+    p.set_defaults(func=cmd_release_generate)
+
+    # release-close
+    p = sub.add_parser("release-close", help="Check release readiness and return status summary for closing")
+    p.add_argument("--version", required=True, help="Release version to check")
+    p.set_defaults(func=cmd_release_close)
 
     # release-state-clear
     p = sub.add_parser("release-state-clear", help="Delete .claude/release-state.json")

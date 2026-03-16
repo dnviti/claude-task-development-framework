@@ -7,7 +7,7 @@ CTDF gives your AI-assisted development workflow a structured backbone: ideas ar
 ## Features
 
 - **Two-pipeline workflow** — separate idea evaluation from task execution
-- **5 streamlined skills** — unified slash commands (`/task`, `/idea`, `/release-start`, `/setup`, `/update`)
+- **6 streamlined skills** — unified slash commands (`/task`, `/idea`, `/release`, `/docs`, `/setup`, `/update`)
 - **Gated release pipeline** — 9 sequential stages with user-confirmed gates, feedback loops, parallel sub-agents, and mandatory local build verification before every push
 - **Per-PR sub-agent analysis** — each PR gets an independent agent for code optimization, security scanning, fix application, and automated merge
 - **Post-tag CI monitoring** — parallel agents monitor remote CI after tagging, auto-fix failures, and move tags when needed (platform-only)
@@ -21,6 +21,7 @@ CTDF gives your AI-assisted development workflow a structured backbone: ideas ar
 - **Cross-platform** — works on Linux, macOS, and Windows with automatic OS detection
 - **Project-agnostic** — works with any language, framework, or tech stack
 - **Human-in-the-loop** — AI assists, but you make every decision at every gate
+- **Yolo mode** — append `yolo` to any command to auto-confirm all gates for fully autonomous execution
 
 ## Prerequisites
 
@@ -67,7 +68,7 @@ claude --plugin-dir ./claude-task-development-framework
 4. **When ready to release:**
 
    ```
-   /release-start 1.0.0
+   /release continue 1.0.0
    ```
 
 ## How It Works
@@ -103,7 +104,7 @@ The release pipeline enforces a strict sequential process with built-in feedback
 ```mermaid
 flowchart TD
     S1["1. CREATE BRANCH<br>release/X.X.X from develop"]
-    S2["2. TASKS LOOP<br>Pick up & implement tasks<br>(parallel subagents)"]
+    S2["2. TASK READINESS GATE<br>Verify all tasks complete<br>(blocks if tasks pending)"]
     S3["3. FETCH OPEN PRs<br>List PRs on release branch"]
     S4["4. PER-PR SUB-AGENTS<br>(one agent per PR, parallel)<br>analyze → optimize → security →<br>comment → fix → merge → cleanup"]
     S5["5. MERGE TO STAGING<br>develop → staging<br>Local build gate → push<br>Builds 'latest' Docker tag"]
@@ -121,7 +122,6 @@ flowchart TD
     S7 --> S8
     S8 --> S9
 
-    S2 -. "self-loop<br>(RPAT)" .-> S2
     S4 -. "unresolved issues<br>create RPAT" .-> S2
     S5 -. "merge/build issues<br>create RPAT" .-> S2
     S6 -. "test failures<br>create RPAT" .-> S2
@@ -162,27 +162,27 @@ flowchart TD
 
 | Stage | Issues go to | Then loops back to |
 |---|---|---|
-| Tasks Loop | Rebase Patch (RPAT) | itself (self-loop) |
-| Per-PR Sub-Agent (unresolved) | Release Patches (RPAT) | Tasks Loop |
-| Merge to Staging | Release Patches (RPAT) | Tasks Loop |
-| Integration Tests | Release Patches (RPAT) | Tasks Loop |
-| Local build pre-push (5 / 7) | RPAT task | Tasks Loop |
+| Per-PR Sub-Agent (unresolved) | Release Patches (RPAT) | Task Readiness Gate |
+| Merge to Staging | Release Patches (RPAT) | Task Readiness Gate |
+| Integration Tests | Release Patches (RPAT) | Task Readiness Gate |
+| Local build pre-push (5 / 7) | RPAT task | Task Readiness Gate |
 | Post-Tag CI Monitor (7f) | Fix → PR → merge → tag move | CI Monitor (7f-bis), same stage |
 
 ### Key Rules Enforced
 
 1. **Stages are sequential and gated** — never skip a stage without explicit user override at a GATE.
-2. **Sub-agents run in parallel, one per PR** — each follows the full analyze → optimize → security → comment → fix → merge → cleanup sequence.
-3. **Sub-agents fix what they can, escalate what they can't** — unresolved issues become RPAT tasks and loop back.
-4. **Every PR comment is structured** — findings and fixes are posted as separate, labeled comments for audit trail.
-5. **Worktrees are always cleaned up** — after PR merge and at pipeline end, no stale worktrees survive.
-6. **Staging = Main minus public visibility** — if it wouldn't survive on main, it doesn't pass staging.
-7. **Tags are only created on the production branch** — after full pipeline through staging.
-8. **Loop counter enforced** — warnings at 3 iterations, forced choice at 5. Prevents infinite loops.
-9. **Local build and tests must pass before any push** — catches regressions from version bump commits or post-merge changes.
-10. **Tags are moved, never recreated** — when post-tag CI fixes are needed: delete tag → pull fix → rebuild → re-tag → delete and recreate platform release.
-11. **Version fields in all manifests must be bumped before tagging** — explicit gate with user confirmation at Step 7d.
-12. **Remote CI monitoring is platform-only** — without a connected platform, local build success is the sole pre-release gate.
+2. **The release pipeline never implements tasks** — Stage 2 is a readiness gate that blocks if any tasks are pending. Users must implement tasks via `/task pick` (or `/task pick all`) before the release can proceed.
+3. **Sub-agents run in parallel, one per PR** — each follows the full analyze → optimize → security → comment → fix → merge → cleanup sequence.
+4. **Sub-agents fix what they can, escalate what they can't** — unresolved issues become RPAT tasks and loop back.
+5. **Every PR comment is structured** — findings and fixes are posted as separate, labeled comments for audit trail.
+6. **Worktrees are always cleaned up** — after PR merge and at pipeline end, no stale worktrees survive.
+7. **Staging = Main minus public visibility** — if it wouldn't survive on main, it doesn't pass staging.
+8. **Tags are only created on the production branch** — after full pipeline through staging.
+9. **Loop counter enforced** — warnings at 3 iterations, forced choice at 5. Prevents infinite loops.
+10. **Local build and tests must pass before any push** — catches regressions from version bump commits or post-merge changes.
+11. **Tags are moved, never recreated** — when post-tag CI fixes are needed: delete tag → pull fix → rebuild → re-tag → delete and recreate platform release.
+12. **Version fields in all manifests must be bumped before tagging** — explicit gate with user confirmation at Step 7d.
+13. **Remote CI monitoring is platform-only** — without a connected platform, local build success is the sole pre-release gate.
 
 ### Branch Strategy
 
@@ -220,8 +220,12 @@ flowchart LR
 | Skill | Usage | Description |
 |-------|-------|-------------|
 | `/task pick` | `/task pick [CODE]` | Pick up the next task — creates worktree, presents briefing, runs quality gates |
+| `/task pick all` | `/task pick all [sequential]` | Pick up and implement all pending release tasks (parallel by default, `sequential` for one-at-a-time) |
 | `/task create` | `/task create [description]` | Create a new task with auto-assigned ID and codebase-informed technical details |
+| `/task create all` | `/task create all [sequential]` | Create tasks from all pending ideas (parallel by default) |
 | `/task continue` | `/task continue [CODE]` | Resume work on a specific in-progress task |
+| `/task continue all` | `/task continue all [sequential]` | Continue all in-progress tasks (parallel by default) |
+| `/task schedule` | `/task schedule CODE [CODE2...] to X.X.X` | Assign task(s) to a release milestone |
 | `/task status` | `/task status` | Show current task summary and recommend next tasks |
 
 ### Idea Management
@@ -238,10 +242,22 @@ flowchart LR
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
-| `/release-start` | `/release-start [X.X.X]` | Full 9-stage release pipeline with parallel sub-agents, local build gates, version bump verification, staging validation, post-tag CI monitoring, and production tagging |
-| `/release-start resume` | `/release-start resume` | Resume a release pipeline from the last saved stage |
-| `/release-start security-only` | `/release-start security-only` | Run security analysis alone on the current branch |
-| `/release-start test-only` | `/release-start test-only` | Run integration tests alone on the current branch |
+| `/release create` | `/release create X.X.X` | Create an empty release milestone for task scheduling |
+| `/release generate` | `/release generate` | Analyze pending tasks and auto-generate a release roadmap with milestones |
+| `/release continue` | `/release continue X.X.X` | Full 9-stage release pipeline with task readiness gate, parallel PR sub-agents, staging validation, and production tagging |
+| `/release continue resume` | `/release continue resume` | Resume a release pipeline from the last saved stage |
+| `/release close` | `/release close X.X.X` | Finalize release: verify tasks, close milestone, cleanup |
+| `/release security-only` | `/release security-only` | Run security analysis alone on the current branch |
+| `/release test-only` | `/release test-only` | Run integration tests alone on the current branch |
+
+### Documentation
+
+| Skill | Usage | Description |
+|-------|-------|-------------|
+| `/docs generate` | `/docs generate` | Analyze the entire codebase and generate full technical documentation from scratch |
+| `/docs sync` | `/docs sync` | Update existing documentation based on latest code changes (called automatically during releases) |
+| `/docs reset` | `/docs reset` | Remove all generated documentation files |
+| `/docs publish` | `/docs publish` | Build and publish documentation as a static website from the Markdown source |
 
 ## Typical Workflow
 
@@ -249,10 +265,21 @@ flowchart LR
 0.  /setup "My Project"                     → Create tracking files + branches
 1.  /idea create "Add email notifications"  → Idea added to ideas.txt
 2.  /idea approve IDEA-NOTIF-0001           → Idea promoted to task in to-do.txt
-3.  /task pick                              → Worktree created, briefing presented
-4.  (implement the task)                    → Write code in isolated worktree
-5.  /task pick                              → Verify, close task, create PR
-6.  /release-start 1.0.0                    → Full pipeline: tasks → PRs → staging → main
+3.  /release create 1.0.0                   → Create release milestone
+4.  /task schedule NOTIF-0001 to 1.0.0      → Assign task to release
+5.  /task pick                              → Worktree created, briefing presented
+6.  (implement the task)                    → Write code in isolated worktree
+7.  /task pick                              → Verify, close task, create PR
+8.  /release continue 1.0.0                 → Full pipeline: tasks → PRs → staging → main
+9.  /release close 1.0.0                    → Finalize and close the release
+```
+
+Or generate a full roadmap automatically:
+
+```
+/release generate                           → Analyze tasks, propose milestones
+/task pick all                              → Implement all release tasks in parallel
+/release continue 1.0.0 yolo                → Run full pipeline autonomously
 ```
 
 ## Issues Tracker Integration (Optional)
@@ -327,10 +354,12 @@ claude-task-development-framework/
 │   ├── update/                  # Update CTDF-managed files
 │   ├── task/                    # Pick, create, continue, status
 │   ├── idea/                    # Create, approve, disapprove, refactor, scout
-│   └── release-start/           # 9-stage gated release pipeline
+│   ├── release/                 # Release management (create, generate, continue, close)
+│   └── docs/                    # Documentation (generate, sync, reset, publish)
 ├── scripts/                     # Python automation scripts (stdlib only)
 │   ├── task_manager.py          # Task/idea management CLI and post-edit hook
 │   ├── release_manager.py       # Release automation CLI (version, changelog)
+│   ├── docs_manager.py          # Documentation lifecycle CLI (discover, staleness, publish)
 │   ├── skill_helper.py          # Consolidated skill helper (context, dispatch, worktrees)
 │   ├── agent_runner.py          # Multi-provider agentic fleet runner
 │   ├── app_manager.py           # Cross-platform port and process management

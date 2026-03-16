@@ -1,13 +1,13 @@
 ---
-name: release-start
-description: "Orchestrate a full release pipeline: branch creation, task loop, PR analysis with parallel subagents, staging validation, integration tests, tagging, and publication. Enforces sequential gating with feedback loops."
+name: release
+description: "Unified release management: create milestones, generate roadmaps, continue the 9-stage pipeline, and close releases. Supports yolo mode for fully autonomous execution."
 disable-model-invocation: true
-argument-hint: "[version X.X.X] [resume] [security-only] [optimize-only] [test-only]"
+argument-hint: "[create X.X.X] [generate] [continue X.X.X] [close X.X.X] [resume] [security-only] [optimize-only] [test-only] [yolo]"
 ---
 
-# Release Start — Full Pipeline Orchestrator
+# Release Manager
 
-You are a release orchestrator driving a complete release pipeline from branch creation through tagging and publication, using subagents for parallel work. Every stage is gated by user confirmation.
+You are a release manager for this project. You handle the full lifecycle of releases: creating milestones, generating roadmaps, driving the release pipeline, and closing releases.
 
 Always respond and work in English.
 
@@ -35,19 +35,109 @@ Use `CTX.config.*` for branch names, tag prefix, verify command — never re-rea
 
 ## Arguments
 
-`SH dispatch --skill release-start --args "$ARGUMENTS"`
+`SH dispatch --skill release --args "$ARGUMENTS"`
 
-Returns `flow`:
-- **version string** (e.g. `"1.2.0"`): Start full pipeline.
-- **`"auto"`**: Use `CTX.release_plan.next_version` or ask.
-- **`"resume"`**: Load `CTX.release_state` and resume at saved stage.
+Returns `flow` and `yolo`:
+- **`"create"`** + `version`: Create an empty release milestone.
+- **`"generate"`**: Analyze tasks and propose a release roadmap.
+- **`"continue"`** + `version`: Run the full 9-stage pipeline.
+- **`"close"`** + `version`: Finalize and close a release.
+- **`"resume"`**: Load `CTX.release_state` and resume Continue Flow at saved stage.
 - **`"security-only"`**: Run Stage 4 sub-steps alone on current branch.
 - **`"optimize-only"`**: Run Stage 4 sub-steps alone on current branch.
 - **`"test-only"`**: Run Stage 6 alone on current branch.
+- **Bare version** (e.g. `"1.2.0"`): Treated as `continue 1.2.0` for backward compat.
+- **`"auto"`**: Use `CTX.release_plan.next_version` or ask.
+
+Also returns `yolo: true/false`. See [Yolo Mode](#yolo-mode).
 
 ---
 
-## Merge Template
+## Yolo Mode
+
+When `yolo` is `true` in the dispatch result, **auto-select the recommended (first) option at every GATE** without waiting for user input. Log each auto-selected choice.
+
+**Yolo never auto-selects "Abort release".** If yolo encounters a situation where abort is the only safe option (e.g. loop counter >= 5), it pauses and asks the user.
+
+Apply yolo to all flows: Create, Generate, Continue (all stages), and Close.
+
+---
+
+## Create Flow
+
+Create a single empty release milestone.
+
+**1.** Version from dispatch `version` field. If missing → GATE: "What version should this release be?"
+
+**2.** Check for duplicates: `RM release-plan-list`. If version already exists → inform and stop.
+
+**3.** Create release entry:
+```bash
+RM release-plan-create --version X.X.X --theme "" --target-date ""
+```
+
+**4.** GATE: "Add a theme and target date?" / "Skip"
+
+If yes: `RM release-plan-set-status --version X.X.X --status planned` (with provided theme/date fields updated).
+
+**5.** Platform milestone (if `CTX.platform.enabled`): `PM create-milestone --title "vX.X.X"`. If fails, warn — local release.json is source of truth.
+
+**6.** Present:
+
+> **Release milestone X.X.X created.**
+>
+> Assign tasks with: `/task schedule [CODE1 CODE2 ...] to X.X.X`
+> Start the release pipeline with: `/release continue X.X.X`
+
+---
+
+## Generate Flow
+
+Analyze all non-done tasks, categorize them, and propose multiple release milestones with an implementation roadmap.
+
+**1.** Gather task data:
+```bash
+RM release-generate
+```
+
+Parse result: `pending_tasks`, `task_count`, `unassigned_count`, `unassigned`, `groups`, `existing_releases`.
+
+If `task_count == 0` → "No pending tasks found." Stop.
+
+**2.** Analyze tasks:
+- Group by prefix/theme and priority
+- Build dependency chains to determine batch ordering
+- Classify scope: `feat` tasks → minor bump, `fix`/`perf` tasks → patch bump
+- Consider existing releases — don't duplicate assignments
+
+**3.** Propose a roadmap with release dates. Present:
+
+> **Proposed Release Roadmap**
+>
+> | Version | Theme | Tasks | Target Date |
+> |---------|-------|-------|-------------|
+> | X.Y.0 | Feature batch | CODE1, CODE2 | YYYY-MM-DD |
+> | X.Y.1 | Bug fixes | CODE3, CODE4 | YYYY-MM-DD |
+
+**4.** GATE: "Approve this roadmap" / "Adjust" / "Cancel"
+
+**5.** For each approved release:
+```bash
+RM release-plan-create --version X.X.X --theme "..." --target-date "YYYY-MM-DD"
+TM schedule-tasks --codes "CODE1,CODE2" --version X.X.X
+```
+
+Platform milestone (if enabled): `PM create-milestone --title "vX.X.X"`.
+
+**6.** Present final roadmap summary with task assignments.
+
+---
+
+## Continue Flow
+
+The full 9-stage release pipeline from branch creation through tagging and publication.
+
+### Merge Template
 
 Used by Stages 5 and 7 when merging SOURCE into TARGET:
 
@@ -57,9 +147,7 @@ Used by Stages 5 and 7 when merging SOURCE into TARGET:
 4. **If `CTX.config.verify_command`:** Run it. On failure → GATE: "Loop back to Stage 2" / "Proceed despite failures" / "Abort release".
 5. GATE: "Proceed" / "Abort release".
 
----
-
-## Local Build Gate
+### Local Build Gate
 
 Reusable procedure invoked before every `git push` in Stages 5 and 7. This is **distinct** from the Merge Template's verify step — it catches regressions introduced after the merge (e.g. by version bump commits).
 
@@ -73,25 +161,21 @@ Reusable procedure invoked before every `git push` in Stages 5 and 7. This is **
 
 3. On success: "Local build and tests passed. Proceeding to push."
 
----
-
-## Loop Counter
+### Loop Counter
 
 Before every loop-back to Stage 2, increment and check:
 
 ```bash
-RM release-state-set --version X.X.X --stage 2 --stage-name "Tasks Loop" --increment-loop
+RM release-state-set --version X.X.X --stage 2 --stage-name "Task Readiness Gate" --increment-loop
 ```
 
 Read `CTX.release_state.loop_count`:
 - **>= 3:** Warn: "This is loop iteration N. Consider whether the release is ready."
 - **>= 5:** Force choice GATE: "Continue iterating" / "Force proceed to next stage" / "Abort release".
 
----
+### Pipeline Stages
 
-## Pipeline Stages
-
-### Stage 1 — Create Dedicated Branch
+#### Stage 1 — Create Dedicated Branch
 
 **1a.** Determine version:
 - Dispatch returned version → use it.
@@ -106,41 +190,45 @@ Present: **Release X.X.X — Task Summary:** [CODE] — Title (status) for each.
 
 **1d.** `RM release-plan-set-status --version X.X.X --status in-progress`
 
-**1e. GATE:** "Proceed to Tasks Loop" / "Abort release" (delete branch, stop).
+**1e. GATE:** "Proceed to Task Readiness Gate" / "Abort release" (delete branch, stop).
 
 ---
 
-### Stage 2 — Tasks Loop (Pick Up)
+#### Stage 2 — Task Readiness Gate
 
-Iterative stage. Tasks, issues, and patches assigned to this release are worked here. Feedback from downstream stages creates RPAT tasks that re-enter this loop.
+Verifies that all tasks assigned to this release are complete before proceeding. **The release pipeline does NOT implement tasks** — task implementation must be done separately using the `/task pick` skill.
 
-**2a.** List pending: `TM list-release-tasks --version X.X.X` — filter `todo`/`progressing`.
+**2a.** List all release tasks: `TM list-release-tasks --version X.X.X`
 
-**2b.** Build dependency graph from `Dependencies:` fields. Group independent tasks into parallel batches.
+**2b.** Check task statuses:
+- If **ALL** tasks are in `done` status → proceed to Stage 3.
+- If **ANY** tasks are NOT in `done` status → STOP (step 2c).
 
-**2c.** Present: "Found N pending tasks. M can run in parallel in batch 1."
+**2c.** Present the blocking report:
 
-**2d. GATE:** "Spawn agents to implement tasks" / "Run sequentially" / "Skip to next stage" / "Abort release".
+> **Release X.X.X blocked — N task(s) still pending.**
+>
+> The following tasks must be completed before the release can proceed:
+>
+> | Code | Title | Status |
+> |------|-------|--------|
+> | [CODE] | [Title] | [todo/progressing] |
+>
+> To implement these tasks, exit the release pipeline and use:
+> - `/task pick [CODE]` — pick up and implement a specific task
+> - `/task pick all` — pick up and implement all pending release tasks at once (parallel by default)
+>
+> Once all tasks are done, re-run `/release continue X.X.X` (or `/release continue resume`) to continue.
 
-**2e.** For each batch, spawn Agent subagents with `isolation: "worktree"` and `mode: "bypassPermissions"`:
+**2d.** Save release state: `RM release-state-set --version X.X.X --stage 2 --stage-name "Task Readiness Gate"`
 
-```
-prompt: "Implement task {CODE} for release {VERSION}. Details: {DESCRIPTION} / {TECHNICAL_DETAILS}. Files create: {FILES_CREATE}, modify: {FILES_MODIFY}. Run VERIFY_COMMAND (max 3 retry), commit as: feat: {description} ({CODE})."
-```
+**2e. GATE:** "Abort release (implement tasks first)" / "Skip to next stage (not recommended — unfinished tasks will not be included)"
 
-**2f.** Present batch results: [CODE] — Success / Failed (reason). Update completed tasks.
-
-**2g.** On failures → GATE: "Retry failed tasks" / "Skip failed" / "Create patch tasks" (RPAT- tasks) / "Abort release".
-
-**2h.** Repeat from 2e if more batches remain.
-
-**2i. GATE:** "Proceed to Fetch Open PRs" / "Re-run failed tasks" (loop 2e) / "Abort release".
-
-**Exit condition:** All tasks for the release completed → proceed with OK.
+**Exit condition:** All tasks for the release are in `done` status → proceed with OK.
 
 ---
 
-### Stage 3 — Fetch Open PRs
+#### Stage 3 — Fetch Open PRs
 
 **3a.** Retrieve open PRs targeting the release branch or development branch:
 
@@ -156,7 +244,7 @@ PM list-pr base="<CTX.config.development_branch>" state="open"
 
 ---
 
-### Stage 4 — Per-PR Sub-Agent Analysis (Parallel)
+#### Stage 4 — Per-PR Sub-Agent Analysis (Parallel)
 
 **For each open PR, spawn an independent sub-agent.** All sub-agents run in parallel — one per PR. Each sub-agent executes the following steps sequentially on its assigned PR:
 
@@ -206,7 +294,7 @@ Report: {{findings_count, fixes_applied, unresolved_issues[], merged: bool}}"
 
 ---
 
-### Stage 5 — Merge to Staging
+#### Stage 5 — Merge to Staging
 
 **5a.** Check staging branch exists: `git branch --list <CTX.config.staging_branch>`
 
@@ -226,7 +314,7 @@ Note: Staging is a mandatory validation gate. It mirrors production configuratio
 
 ---
 
-### Stage 6 — Integration Tests
+#### Stage 6 — Integration Tests
 
 **6a.** Determine test command: `CTX.config.verify_command` if set, else auto-detect:
 - `package.json` with `test` script → `npm test`
@@ -249,7 +337,7 @@ GATE: "Loop back to Stage 2 to fix test failures" / "Proceed despite failures" /
 
 ---
 
-### Stage 7 — Merge to Main + Tag
+#### Stage 7 — Merge to Main + Tag
 
 **7a.** Merge staging into production per **Merge Template**: `<CTX.config.staging_branch>` → `<CTX.config.production_branch>`.
 
@@ -343,13 +431,13 @@ GATE (all green): "All CI workflows passed. Proceed to Step 7g." / "Abort releas
 
 **7g.** If platform enabled: create release via `PM create-release`. If fails, warn — local tag is source of truth.
 
-**7h.** Optional — spawn Agent for docs update.
+**7h.** Documentation sync — run `/docs sync` to update project documentation based on release changes. If `docs/` directory does not exist, skip with: "No existing docs found — run `/docs generate` to create initial documentation." If `docs/` exists, run the sync flow automatically. On failure, warn but do not block the release.
 
 **7i. GATE:** "Confirm release published" / "Rollback tag" (`git tag -d <prefix>X.X.X && git push origin :refs/tags/<prefix>X.X.X`) / "Abort release".
 
 ---
 
-### Stage 8 — Users Testing
+#### Stage 8 — Users Testing
 
 Present:
 
@@ -360,7 +448,7 @@ Present:
 
 ---
 
-### Stage 9 — End
+#### Stage 9 — End
 
 **9a.** Mark released: `RM release-plan-mark-released --version X.X.X`
 
@@ -379,7 +467,7 @@ for every task worktree associated with this release.
 | Stage | Status |
 |-------|--------|
 | 1. Create Branch | Branch created |
-| 2. Tasks Loop | N tasks implemented |
+| 2. Task Readiness Gate | All tasks verified complete |
 | 3. Fetch Open PRs | N PRs found |
 | 4. Per-PR Analysis | N PRs analyzed (M findings, K fixed) |
 | 5. Merge Staging | Clean/Conflict resolved |
@@ -390,36 +478,76 @@ for every task worktree associated with this release.
 
 Total loop iterations: N | Patch tasks created: N | Subagents spawned: N
 
----
-
-## Feedback Loop Summary
+### Feedback Loop Summary
 
 | Stage | Issues go to | Then loops back to |
 |---|---|---|
-| Tasks Loop | Rebase Patch (RPAT) | itself (self-loop via 2g) |
-| Per-PR Sub-Agent (unresolved) | Release Patches (RPAT) | Tasks Loop (Stage 2) |
-| Merge to Staging | Release Patches (RPAT) | Tasks Loop (Stage 2) |
-| Integration Tests | Release Patches (RPAT) | Tasks Loop (Stage 2) |
-| Local build pre-push (5 / 7) | RPAT task | Tasks Loop (Stage 2) |
+| Per-PR Sub-Agent (unresolved) | Release Patches (RPAT) | Task Readiness Gate (Stage 2) |
+| Merge to Staging | Release Patches (RPAT) | Task Readiness Gate (Stage 2) |
+| Integration Tests | Release Patches (RPAT) | Task Readiness Gate (Stage 2) |
+| Local build pre-push (5 / 7) | RPAT task | Task Readiness Gate (Stage 2) |
 | Post-Tag CI Monitor (7f) | Fix → PR → merge → tag move | CI Monitor (7f-bis), same stage |
+
+---
+
+## Close Flow
+
+Manually finalize a release: verify all tasks are complete, close the milestone, and clean up.
+
+**1.** Version from dispatch `version` field. If missing → list in-progress releases from `RM release-plan-list` and ask.
+
+**2.** Check release readiness:
+```bash
+RM release-close --version X.X.X
+```
+
+**3.** If `all_tasks_done` is `false`: present pending tasks table.
+GATE: "Force close anyway (pending tasks will NOT be included)" / "Cancel (implement tasks first)"
+
+**4.** If `all_tasks_done` is `true` (or force-closed):
+
+```bash
+RM release-plan-mark-released --version X.X.X
+```
+
+**5.** Platform milestone close (if `CTX.platform.enabled`): close milestone via `PM close-milestone --title "vX.X.X"`. If fails, warn.
+
+**6.** Clean up release state (if exists for this version):
+```bash
+RM release-state-clear
+```
+
+**7.** Clean up all release-related worktrees:
+```bash
+TM remove-worktree --task-code <CODE>
+```
+for every task worktree associated with this release.
+
+**8.** Present:
+
+> **Release X.X.X closed.**
+> Tasks: N done out of M total.
+> Status: released | Milestone: closed (or N/A)
 
 ---
 
 ## Important Rules
 
-1. **Stages are sequential and gated** — never skip unless user explicitly chooses via GATE.
-2. **Sub-agents run in parallel, one per PR.** Each follows the full analyze → optimize → security → comment → fix → comment → merge → cleanup sequence.
-3. **Sub-agents fix what they can, escalate what they can't.** Unresolved issues become RPAT tasks and loop back to Stage 2.
-4. **Every PR comment is structured.** Findings and fixes are posted as separate, labeled comments for audit trail.
-5. **Worktrees are always cleaned up.** After PR merge and at pipeline end, all worktrees are deleted.
-6. **Staging = Main minus public visibility.** If it wouldn't survive on main, it doesn't pass staging.
-7. **Every unresolved issue loops back to Stage 2.** No ad-hoc fixes in downstream stages.
-8. **The release branch is single source of truth** until merged into develop. Then develop → staging → main.
-9. **Tags are only created on the production branch** after full pipeline through staging.
-10. **Use CTX values** — never hardcode branch names, paths, or commands.
-11. **All output in English.**
-12. **Every GATE includes an "Abort release" option.**
-13. **Local build and tests must pass before any push.** Run `CTX.config.verify_command` locally before pushing to staging or production. This is distinct from the Merge Template's verify step — it catches regressions introduced after merge (e.g. by version bump commits). Failures create RPAT tasks and loop back to Stage 2.
-14. **Tags are moved, never recreated from scratch, when post-tag fixes are needed.** Sequence: delete local tag → delete remote tag → pull fix → local build gate → recreate tag at new HEAD → push tag → delete platform release → recreate platform release.
-15. **Version fields in all manifest files must be bumped before tagging.** Any file still holding the previous version when the tag is created forces a full tag-move cycle. Verify at Step 7d.
-16. **Remote CI monitoring only runs when platform integration is enabled** (`CTX.platform.enabled`). Without a connected platform, local build success is the sole pre-release gate.
+1. **Stages are sequential and gated** — never skip unless user explicitly chooses via GATE (or yolo auto-selects).
+2. **The release pipeline NEVER implements tasks.** Stage 2 is a readiness gate only. If tasks are pending, the pipeline stops and directs the user to `/task pick` (or `/task pick all`). Task implementation is always the user's responsibility via the `/task pick` skill.
+3. **Sub-agents run in parallel, one per PR.** Each follows the full analyze → optimize → security → comment → fix → comment → merge → cleanup sequence.
+4. **Sub-agents fix what they can, escalate what they can't.** Unresolved issues become RPAT tasks and loop back to Stage 2.
+5. **Every PR comment is structured.** Findings and fixes are posted as separate, labeled comments for audit trail.
+6. **Worktrees are always cleaned up.** After PR merge and at pipeline end, all worktrees are deleted.
+7. **Staging = Main minus public visibility.** If it wouldn't survive on main, it doesn't pass staging.
+8. **Every unresolved issue loops back to Stage 2.** No ad-hoc fixes in downstream stages. When RPAT tasks are created, the pipeline loops back to the Task Readiness Gate, which will stop if those tasks are not yet done — the user must implement them via `/task pick` before resuming.
+9. **The release branch is single source of truth** until merged into develop. Then develop → staging → main.
+10. **Tags are only created on the production branch** after full pipeline through staging.
+11. **Use CTX values** — never hardcode branch names, paths, or commands.
+12. **All output in English.**
+13. **Every GATE includes an "Abort release" option** (except in yolo mode, where abort is never auto-selected).
+14. **Local build and tests must pass before any push.** Run `CTX.config.verify_command` locally before pushing to staging or production. This is distinct from the Merge Template's verify step — it catches regressions introduced after merge (e.g. by version bump commits). Failures create RPAT tasks and loop back to Stage 2.
+15. **Tags are moved, never recreated from scratch, when post-tag fixes are needed.** Sequence: delete local tag → delete remote tag → pull fix → local build gate → recreate tag at new HEAD → push tag → delete platform release → recreate platform release.
+16. **Version fields in all manifest files must be bumped before tagging.** Any file still holding the previous version when the tag is created forces a full tag-move cycle. Verify at Step 7d.
+17. **Remote CI monitoring only runs when platform integration is enabled** (`CTX.platform.enabled`). Without a connected platform, local build success is the sole pre-release gate.
+18. **Yolo mode auto-selects the recommended option** at every GATE. It never auto-selects "Abort". At loop counter >= 5, yolo pauses and asks.

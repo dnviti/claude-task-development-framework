@@ -512,7 +512,7 @@ Create `CHANGELOG.md` with Keep a Changelog boilerplate and `## [Unreleased]` se
 
 ### Init Step 7: Orientation Report
 
-Present: stack, directory, getting started commands (install, `make dev`, localhost URL), project structure overview, git branches (`main`, `develop`), Makefile targets (`dev/stop/restart/test/lint/verify`), cross-platform scripts, and available CTDF skills (`/task create`, `/idea create`, `/release-start`).
+Present: stack, directory, getting started commands (install, `make dev`, localhost URL), project structure overview, git branches (`main`, `develop`), Makefile targets (`dev/stop/restart/test/lint/verify`), cross-platform scripts, and available CTDF skills (`/task create`, `/idea create`, `/release`).
 
 ### Init Step 8: Issues Tracker Integration (Optional)
 

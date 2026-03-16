@@ -475,56 +475,86 @@ def _task_in_progressing(code: str) -> bool:
 
 def dispatch_task(parts: list[str]) -> dict:
     """Dispatch for the task skill."""
+    parts, yolo = _extract_yolo(parts)
+    base = {"yolo": yolo}
+
     if not parts:
-        return {"flow": "status", "task_code": "", "remaining_args": ""}
+        return {**base, "flow": "status", "task_code": "", "remaining_args": ""}
 
     first = parts[0].lower()
     rest = parts[1:]
 
     if first == "pick":
+        if rest and rest[0].lower() == "all":
+            mode = rest[1].lower() if len(rest) > 1 else "parallel"
+            return {**base, "flow": "pick-all", "task_code": "", "remaining_args": mode}
         code = rest[0].upper() if rest else ""
         remaining = " ".join(rest[1:]) if len(rest) > 1 else ""
-        return {"flow": "pick", "task_code": code, "remaining_args": remaining}
+        return {**base, "flow": "pick", "task_code": code, "remaining_args": remaining}
     elif first == "create":
-        return {"flow": "create", "task_code": "", "remaining_args": " ".join(rest)}
+        if rest and rest[0].lower() == "all":
+            mode = rest[1].lower() if len(rest) > 1 else "parallel"
+            return {**base, "flow": "create-all", "task_code": "", "remaining_args": mode}
+        return {**base, "flow": "create", "task_code": "", "remaining_args": " ".join(rest)}
     elif first == "continue":
+        if rest and rest[0].lower() == "all":
+            mode = rest[1].lower() if len(rest) > 1 else "parallel"
+            return {**base, "flow": "continue-all", "task_code": "", "remaining_args": mode}
         code = rest[0].upper() if rest else ""
         remaining = " ".join(rest[1:]) if len(rest) > 1 else ""
-        return {"flow": "continue", "task_code": code, "remaining_args": remaining}
+        return {**base, "flow": "continue", "task_code": code, "remaining_args": remaining}
+    elif first == "schedule":
+        # Parse: schedule CODE [CODE2 ...] to VERSION
+        to_idx = None
+        for i, r in enumerate(rest):
+            if r.lower() == "to":
+                to_idx = i
+                break
+        if to_idx is not None:
+            task_codes = [r.upper() for r in rest[:to_idx]]
+            version = rest[to_idx + 1] if to_idx + 1 < len(rest) else ""
+            return {**base, "flow": "schedule", "task_code": ",".join(task_codes),
+                    "remaining_args": version}
+        else:
+            return {**base, "flow": "schedule", "task_code": "",
+                    "remaining_args": " ".join(rest)}
     elif first == "status":
-        return {"flow": "status", "task_code": "", "remaining_args": " ".join(rest)}
+        return {**base, "flow": "status", "task_code": "", "remaining_args": " ".join(rest)}
     elif _is_task_code(parts[0].upper()):
         code = parts[0].upper()
         if _task_in_progressing(code):
-            return {"flow": "continue", "task_code": code, "remaining_args": " ".join(rest)}
+            return {**base, "flow": "continue", "task_code": code, "remaining_args": " ".join(rest)}
         else:
-            return {"flow": "pick", "task_code": code, "remaining_args": " ".join(rest)}
+            return {**base, "flow": "pick", "task_code": code, "remaining_args": " ".join(rest)}
     else:
-        return {"flow": "status", "task_code": "", "remaining_args": " ".join(parts)}
+        return {**base, "flow": "status", "task_code": "", "remaining_args": " ".join(parts)}
 
 
 def dispatch_idea(parts: list[str]) -> dict:
     """Dispatch for the idea skill."""
+    parts, yolo = _extract_yolo(parts)
+    base = {"yolo": yolo}
+
     if not parts:
-        return {"flow": "list", "task_code": "", "remaining_args": ""}
+        return {**base, "flow": "list", "task_code": "", "remaining_args": ""}
 
     first = parts[0].lower()
     rest = parts[1:]
 
     if first == "create":
-        return {"flow": "create", "task_code": "", "remaining_args": " ".join(rest)}
+        return {**base, "flow": "create", "task_code": "", "remaining_args": " ".join(rest)}
     elif first == "approve":
         code = rest[0].upper() if rest else ""
-        return {"flow": "approve", "task_code": code, "remaining_args": " ".join(rest[1:])}
+        return {**base, "flow": "approve", "task_code": code, "remaining_args": " ".join(rest[1:])}
     elif first == "disapprove":
         code = rest[0].upper() if rest else ""
-        return {"flow": "disapprove", "task_code": code, "remaining_args": " ".join(rest[1:])}
+        return {**base, "flow": "disapprove", "task_code": code, "remaining_args": " ".join(rest[1:])}
     elif first == "refactor":
-        return {"flow": "refactor", "task_code": "", "remaining_args": " ".join(rest)}
+        return {**base, "flow": "refactor", "task_code": "", "remaining_args": " ".join(rest)}
     elif first == "scout":
-        return {"flow": "scout", "task_code": "", "remaining_args": " ".join(rest)}
+        return {**base, "flow": "scout", "task_code": "", "remaining_args": " ".join(rest)}
     else:
-        return {"flow": "list", "task_code": "", "remaining_args": " ".join(parts)}
+        return {**base, "flow": "list", "task_code": "", "remaining_args": " ".join(parts)}
 
 
 def dispatch_setup(parts: list[str]) -> dict:
@@ -547,26 +577,59 @@ def dispatch_setup(parts: list[str]) -> dict:
         return {"flow": "standard", "task_code": "", "remaining_args": " ".join(parts)}
 
 
-def dispatch_release_start(parts: list[str]) -> dict:
-    """Dispatch for the release-start skill."""
+def _extract_yolo(parts: list[str]) -> tuple[list[str], bool]:
+    """Extract yolo flag from argument list, return filtered parts and flag."""
+    yolo = False
+    filtered = []
+    for p in parts:
+        if p.lower() == "yolo":
+            yolo = True
+        else:
+            filtered.append(p)
+    return filtered, yolo
+
+
+def dispatch_release(parts: list[str]) -> dict:
+    """Dispatch for the release skill."""
+    parts, yolo = _extract_yolo(parts)
+    base = {"task_code": "", "remaining_args": "", "yolo": yolo}
+
     if not parts:
-        return {"flow": "auto", "task_code": "", "remaining_args": ""}
+        return {**base, "flow": "auto"}
 
     first = parts[0].lower()
     rest = parts[1:]
 
-    if first == "resume":
-        return {"flow": "resume", "task_code": "", "remaining_args": " ".join(rest)}
+    if first == "create":
+        version = rest[0] if rest and _is_version(rest[0]) else ""
+        return {**base, "flow": "create", "version": version,
+                "remaining_args": " ".join(rest[1:]) if len(rest) > 1 else ""}
+    elif first == "generate":
+        return {**base, "flow": "generate", "remaining_args": " ".join(rest)}
+    elif first == "continue":
+        if rest and rest[0].lower() == "resume":
+            return {**base, "flow": "resume", "remaining_args": " ".join(rest[1:])}
+        version = rest[0] if rest and _is_version(rest[0]) else ""
+        return {**base, "flow": "continue", "version": version,
+                "remaining_args": " ".join(rest[1:]) if len(rest) > 1 else ""}
+    elif first == "close":
+        version = rest[0] if rest and _is_version(rest[0]) else ""
+        return {**base, "flow": "close", "version": version,
+                "remaining_args": " ".join(rest[1:]) if len(rest) > 1 else ""}
+    elif first == "resume":
+        return {**base, "flow": "resume", "remaining_args": " ".join(rest)}
     elif first in ("security-only", "security_only"):
-        return {"flow": "security-only", "task_code": "", "remaining_args": " ".join(rest)}
+        return {**base, "flow": "security-only", "remaining_args": " ".join(rest)}
     elif first in ("optimize-only", "optimize_only"):
-        return {"flow": "optimize-only", "task_code": "", "remaining_args": " ".join(rest)}
+        return {**base, "flow": "optimize-only", "remaining_args": " ".join(rest)}
     elif first in ("test-only", "test_only"):
-        return {"flow": "test-only", "task_code": "", "remaining_args": " ".join(rest)}
+        return {**base, "flow": "test-only", "remaining_args": " ".join(rest)}
     elif _is_version(first):
-        return {"flow": first, "task_code": "", "remaining_args": " ".join(rest)}
+        # Bare version: treat as "continue X.X.X" for backward compat
+        return {**base, "flow": "continue", "version": first,
+                "remaining_args": " ".join(rest)}
     else:
-        return {"flow": "auto", "task_code": "", "remaining_args": " ".join(parts)}
+        return {**base, "flow": "auto", "remaining_args": " ".join(parts)}
 
 
 def dispatch_update(parts: list[str]) -> dict:
@@ -580,12 +643,31 @@ def dispatch_update(parts: list[str]) -> dict:
     return {"flow": "all", "task_code": "", "remaining_args": " ".join(parts)}
 
 
+def dispatch_docs(parts: list[str]) -> dict:
+    """Dispatch for the docs skill."""
+    parts, yolo = _extract_yolo(parts)
+    base = {"task_code": "", "remaining_args": "", "yolo": yolo}
+
+    if not parts:
+        return {**base, "flow": "generate"}
+
+    first = parts[0].lower()
+    rest = parts[1:]
+
+    if first in ("generate", "sync", "reset", "publish"):
+        return {**base, "flow": first, "remaining_args": " ".join(rest)}
+    else:
+        return {**base, "flow": "generate", "remaining_args": " ".join(parts)}
+
+
 DISPATCHERS = {
     "task": dispatch_task,
     "idea": dispatch_idea,
     "setup": dispatch_setup,
-    "release-start": dispatch_release_start,
+    "release": dispatch_release,
+    "release-start": dispatch_release,  # backward compat
     "update": dispatch_update,
+    "docs": dispatch_docs,
 }
 
 
