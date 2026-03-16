@@ -1403,11 +1403,11 @@ def cmd_platform_cmd(args):
             title = _shlex_quote(params.get("title", ""))
             cmd = f'gh api repos/{repo}/milestones --method POST -f title={title}'
         elif op == "close-milestone":
-            title = params.get("title", "")
+            title = _shlex_quote(params.get("title", ""))
             # Two-step: resolve milestone number from title, then PATCH state to closed
             cmd = (
                 f'gh api repos/{repo}/milestones --jq '
-                f"'.[] | select(.title==\"{title}\") | .number' "
+                f"'.[] | select(.title=={title}) | .number' "
                 f'| xargs -I {{}} gh api repos/{repo}/milestones/{{}} '
                 f'--method PATCH -f state=closed'
             )
@@ -1485,11 +1485,11 @@ def cmd_platform_cmd(args):
             title = _shlex_quote(params.get("title", ""))
             cmd = f'glab api projects/:id/milestones --method POST -f title={title}'
         elif op == "close-milestone":
-            title = params.get("title", "")
+            title = _shlex_quote(params.get("title", ""))
             # Two-step: resolve milestone ID from title, then PUT state_event to close
             cmd = (
                 f'glab api projects/:id/milestones --jq '
-                f"'.[] | select(.title==\"{title}\") | .id' "
+                f"'.[] | select(.title=={title}) | .id' "
                 f'| xargs -I {{}} glab api projects/:id/milestones/{{}} '
                 f'--method PUT -f state_event=close'
             )
