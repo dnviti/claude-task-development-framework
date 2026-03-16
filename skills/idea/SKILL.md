@@ -2,7 +2,7 @@
 name: idea
 description: "Unified idea management: create, approve, disapprove, refactor, or scout ideas for the project backlog."
 disable-model-invocation: true
-argument-hint: "[create [description]] [approve IDEA-CODE] [disapprove IDEA-CODE] [refactor] [scout]"
+argument-hint: "[create [description]] [approve IDEA-CODE] [disapprove IDEA-CODE] [refactor] [scout] [yolo]"
 ---
 
 # Idea Manager
@@ -41,6 +41,8 @@ Always respond and work in English. All idea and task content MUST be written in
 `SH dispatch --skill idea --args "$ARGUMENTS"`
 
 Routes to: `create`, `approve`, `disapprove`, `refactor`, `scout`, or `list` flow.
+
+Also returns `yolo: true/false`. When `yolo` is `true`, **auto-select the recommended (first) option at every GATE** without waiting for user input. Log each auto-selected choice. Yolo never auto-selects destructive or cancel options.
 
 If `list`: show all ideas (from `ideas.txt` in local/dual mode, or platform issues in platform-only mode) and ask which action to perform. STOP.
 
