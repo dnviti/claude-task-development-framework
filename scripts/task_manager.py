@@ -1399,6 +1399,18 @@ def cmd_platform_cmd(args):
             cmd += f""" -q '[.[] | select(.headBranch=="{ref}" or .headSha=="{ref}")]'"""
         elif op == "delete-release":
             cmd = f'gh release delete "{params.get("tag", "")}" --repo "{repo}" --yes'
+        elif op == "create-milestone":
+            title = _shlex_quote(params.get("title", ""))
+            cmd = f'gh api repos/{repo}/milestones --method POST -f title={title}'
+        elif op == "close-milestone":
+            title = params.get("title", "")
+            # Two-step: resolve milestone number from title, then PATCH state to closed
+            cmd = (
+                f'gh api repos/{repo}/milestones --jq '
+                f"'.[] | select(.title==\"{title}\") | .number' "
+                f'| xargs -I {{}} gh api repos/{repo}/milestones/{{}} '
+                f'--method PATCH -f state=closed'
+            )
         else:
             print(json.dumps({"error": f"Unknown operation: {op}"}))
             sys.exit(1)
@@ -1469,6 +1481,18 @@ def cmd_platform_cmd(args):
             cmd = f'glab ci list --repo "{repo}" --ref "{ref}" --output json'
         elif op == "delete-release":
             cmd = f'glab release delete "{params.get("tag", "")}" --repo "{repo}" --yes'
+        elif op == "create-milestone":
+            title = _shlex_quote(params.get("title", ""))
+            cmd = f'glab api projects/:id/milestones --method POST -f title={title}'
+        elif op == "close-milestone":
+            title = params.get("title", "")
+            # Two-step: resolve milestone ID from title, then PUT state_event to close
+            cmd = (
+                f'glab api projects/:id/milestones --jq '
+                f"'.[] | select(.title==\"{title}\") | .id' "
+                f'| xargs -I {{}} glab api projects/:id/milestones/{{}} '
+                f'--method PUT -f state_event=close'
+            )
         else:
             print(json.dumps({"error": f"Unknown operation: {op}"}))
             sys.exit(1)
