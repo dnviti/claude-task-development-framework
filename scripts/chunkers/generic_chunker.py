@@ -7,7 +7,7 @@ Zero external dependencies — stdlib only.
 """
 
 import re
-from chunkers import Chunk
+from chunkers import Chunk, _split_large_chunk
 
 
 # ── Language-family boundary patterns ────────────────────────────────────────
@@ -157,25 +157,30 @@ def chunk_generic(file_path: str, content: str, language: str,
             )
             # Split if oversized
             if len(text) > max_chunk_size:
-                chunks.extend(_split_chunk(chunk, max_chunk_size))
+                chunks.extend(_split_large_chunk(chunk, max_chunk_size))
             else:
                 chunks.append(chunk)
 
     return chunks
 
 
+# Pre-compiled regex for keyword removal in name extraction (performance fix)
+_KEYWORD_PATTERN = re.compile(
+    r"\b(?:" + "|".join([
+        "export", "default", "async", "public", "private",
+        "protected", "static", "abstract", "override", "virtual",
+        "inline", "const", "extern", "pub", "local", "def", "defp",
+        "defmodule", "fn", "func", "fun", "function", "class",
+        "interface", "struct", "enum", "trait", "impl", "protocol",
+        "module", "type", "void", "int", "string", "bool",
+    ]) + r")\b"
+)
+
+
 def _extract_name(definition_line: str) -> str:
     """Extract the identifier name from a definition line."""
-    # Try to find the first word-like identifier after keywords
-    cleaned = definition_line.strip()
-    # Remove common keywords
-    for kw in ["export", "default", "async", "public", "private",
-               "protected", "static", "abstract", "override", "virtual",
-               "inline", "const", "extern", "pub", "local", "def", "defp",
-               "defmodule", "fn", "func", "fun", "function", "class",
-               "interface", "struct", "enum", "trait", "impl", "protocol",
-               "module", "type", "void", "int", "string", "bool"]:
-        cleaned = re.sub(rf"\b{kw}\b", "", cleaned)
+    # Remove common keywords using pre-compiled pattern
+    cleaned = _KEYWORD_PATTERN.sub("", definition_line.strip())
 
     # Find the first remaining identifier
     m = re.search(r"[a-zA-Z_]\w*", cleaned)
@@ -230,45 +235,3 @@ def _chunk_by_lines(file_path: str, content: str, language: str,
     return chunks
 
 
-def _split_chunk(chunk: Chunk, max_size: int) -> list[Chunk]:
-    """Split an oversized chunk at line boundaries."""
-    lines = chunk.content.splitlines()
-    parts: list[Chunk] = []
-    current: list[str] = []
-    current_len = 0
-    part_start = chunk.start_line
-
-    for i, line in enumerate(lines):
-        line_len = len(line) + 1
-        if current_len + line_len > max_size and current:
-            parts.append(Chunk(
-                content="\n".join(current),
-                file_path=chunk.file_path,
-                chunk_type=chunk.chunk_type,
-                name=f"{chunk.name} (part {len(parts) + 1})",
-                start_line=part_start,
-                end_line=chunk.start_line + i - 1,
-                language=chunk.language,
-                file_role=chunk.file_role,
-                metadata={**chunk.metadata, "part": len(parts) + 1},
-            ))
-            current = []
-            current_len = 0
-            part_start = chunk.start_line + i
-        current.append(line)
-        current_len += line_len
-
-    if current:
-        parts.append(Chunk(
-            content="\n".join(current),
-            file_path=chunk.file_path,
-            chunk_type=chunk.chunk_type,
-            name=f"{chunk.name} (part {len(parts) + 1})",
-            start_line=part_start,
-            end_line=chunk.end_line,
-            language=chunk.language,
-            file_role=chunk.file_role,
-            metadata={**chunk.metadata, "part": len(parts) + 1},
-        ))
-
-    return parts

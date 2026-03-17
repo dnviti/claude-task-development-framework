@@ -91,19 +91,8 @@ class ApiEmbeddingProvider(EmbeddingProvider):
         """Make a single API call for a batch of texts."""
         url = self._config["url"]
 
-        # Build request body
-        if self._provider == "openai":
-            body = {
-                "input": texts,
-                "model": self._model,
-            }
-        elif self._provider == "voyage":
-            body = {
-                "input": texts,
-                "model": self._model,
-            }
-        else:
-            body = {"input": texts, "model": self._model}
+        # Build request body (OpenAI and Voyage share the same format)
+        body = {"input": texts, "model": self._model}
 
         data = json.dumps(body).encode("utf-8")
         headers = {
@@ -120,7 +109,7 @@ class ApiEmbeddingProvider(EmbeddingProvider):
         except urllib.error.HTTPError as e:
             error_body = ""
             try:
-                error_body = e.read().decode("utf-8")
+                error_body = e.read().decode("utf-8")[:500]  # Truncate to avoid leaking sensitive data
             except Exception:
                 pass
             raise RuntimeError(

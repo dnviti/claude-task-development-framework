@@ -87,7 +87,7 @@ class EmbeddingCache:
 
         Returns embeddings in the same order as the input texts.
         """
-        results: list[list[float] | None] = [None] * len(texts)
+        results: list[list[float]] = [[]] * len(texts)
         uncached_indices: list[int] = []
         uncached_texts: list[str] = []
 
@@ -108,7 +108,7 @@ class EmbeddingCache:
                 results[idx] = emb
                 self.put(text, emb)
 
-        return results  # type: ignore[return-value]
+        return results
 
     def clear(self):
         """Remove all cached embeddings."""

@@ -38,6 +38,16 @@ from analyzers import (
 )
 
 
+# ── Utilities ────────────────────────────────────────────────────────────────
+
+def _escape_filter_value(value: str) -> str:
+    """Escape a string value for use in LanceDB filter expressions.
+
+    Prevents filter injection by escaping single quotes.
+    """
+    return value.replace("'", "''")
+
+
 # ── Constants ────────────────────────────────────────────────────────────────
 
 DEFAULT_INDEX_DIR = ".claude/memory/vectors"
@@ -282,7 +292,7 @@ def cmd_index(args):
     if files_to_remove:
         for fp in files_to_remove:
             try:
-                table.delete(f"file_path = '{fp}'")
+                table.delete(f"file_path = '{_escape_filter_value(fp)}'")
             except Exception:
                 pass  # Table may not have entries for this file
 
@@ -290,7 +300,7 @@ def cmd_index(args):
     if not args.full:
         for fp in files_to_index:
             try:
-                table.delete(f"file_path = '{fp}'")
+                table.delete(f"file_path = '{_escape_filter_value(fp)}'")
             except Exception:
                 pass
     else:
@@ -433,13 +443,17 @@ def cmd_search(args):
               file=sys.stderr)
         sys.exit(1)
 
+    # Over-fetch 3x to allow post-filtering by file/type while still
+    # returning enough results. The final .limit(top_k) below trims to size.
     results = table.search(query_embedding).limit(top_k * 3)
 
-    # Apply filters
+    # Apply filters (escape user input to prevent filter injection)
     if file_filter:
-        results = results.where(f"file_path LIKE '%{file_filter}%'")
+        safe_file_filter = _escape_filter_value(file_filter)
+        results = results.where(f"file_path LIKE '%{safe_file_filter}%'")
     if type_filter:
-        results = results.where(f"chunk_type = '{type_filter}'")
+        safe_type_filter = _escape_filter_value(type_filter)
+        results = results.where(f"chunk_type = '{safe_type_filter}'")
 
     df = results.limit(top_k).to_pandas()
 
@@ -665,7 +679,7 @@ def hook_file_changed(file_path: str):
 
         # Remove old entries for this file
         try:
-            table.delete(f"file_path = '{rel_path}'")
+            table.delete(f"file_path = '{_escape_filter_value(rel_path)}'")
         except Exception:
             pass
 
@@ -705,6 +719,82 @@ def hook_file_changed(file_path: str):
 
     except Exception:
         pass  # Hook failures must be silent and non-blocking
+
+
+# ── Shared Helper: Index a Document ──────────────────────────────────────────
+
+def try_vector_index(root: Path, content: str, doc_name: str,
+                     doc_type: str = "report"):
+    """Attempt to index a text document into the vector store (opt-in, non-fatal).
+
+    Shared helper used by codebase_analyzer and memory_builder to optionally
+    index their output into the vector memory layer.
+
+    Args:
+        root: Project root path.
+        content: Document content to index.
+        doc_name: Logical name / file_path for the document in the index.
+        doc_type: Chunk type label (e.g. "report", "memory").
+    """
+    try:
+        from chunkers import chunk_text_document
+        from embeddings import create_provider, EmbeddingCache
+
+        config = get_effective_config(root)
+        if not config.get("enabled"):
+            return
+
+        ok, _ = _check_deps()
+        if not ok:
+            return
+
+        index_dir = root / config["index_path"]
+        if not (index_dir / "lancedb").exists():
+            return
+
+        chunks = chunk_text_document(doc_name, content, doc_type=doc_type,
+                                     max_chunk_size=config.get("chunk_size", 2000))
+        if not chunks:
+            return
+
+        emb_config = {
+            "provider": config["embedding_provider"],
+            "model": config["embedding_model"],
+            "api_key_env": config["embedding_api_key_env"],
+        }
+        provider = create_provider(emb_config)
+        cache = EmbeddingCache(index_dir / "embedding_cache")
+        db = _open_db(index_dir)
+        table = _get_or_create_table(db, provider.dimension())
+
+        # Remove old entries for this doc (escape single quotes in doc_name)
+        safe_name = doc_name.replace("'", "''")
+        try:
+            table.delete(f"file_path = '{safe_name}'")
+        except Exception:
+            pass
+
+        texts = [c.content for c in chunks]
+        embeddings = cache.embed_with_cache(provider, texts)
+        records = []
+        for chunk, emb in zip(chunks, embeddings):
+            records.append({
+                "vector": emb,
+                "content": chunk.content,
+                "file_path": chunk.file_path,
+                "chunk_type": chunk.chunk_type,
+                "name": chunk.name,
+                "start_line": chunk.start_line,
+                "end_line": chunk.end_line,
+                "language": chunk.language,
+                "file_role": chunk.file_role,
+                "content_hash": chunk.content_hash,
+            })
+        table.add(records)
+        print(f"  Indexed {len(chunks)} {doc_type} chunks into vector memory.",
+              file=sys.stderr)
+    except Exception:
+        pass  # Vector indexing is opt-in; failures are non-fatal
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
