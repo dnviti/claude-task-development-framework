@@ -19,7 +19,7 @@ during /setup and updated on every file write via the PostToolUse hook.
 Missing configuration is treated as enabled (always-on default).
 
 Required dependencies: lancedb, sentence-transformers
-Install with: pip install lancedb sentence-transformers
+Install with: pip install "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"
 
 Zero stdlib dependencies — stdlib only for core logic. Required for indexing:
 lancedb, sentence-transformers (or onnxruntime+tokenizers), numpy, pyarrow.
@@ -193,8 +193,8 @@ def ensure_initialized(root: Path) -> bool:
         if not ok:
             print(f"Cannot auto-initialize: {msg}", file=sys.stderr)
             print(
-                "To install required dependencies run:\n"
-                "  pip install lancedb sentence-transformers",
+                'To install required dependencies run:\n'
+                '  pip install "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"',
                 file=sys.stderr,
             )
             return False
@@ -309,7 +309,7 @@ def _check_deps() -> tuple[bool, str]:
             if not msg:
                 msg = (
                     "Missing required dependencies for vector memory.\n"
-                    "Install with: pip install lancedb sentence-transformers"
+                    'Install with: pip install "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"'
                 )
             return False, msg
         return True, ""
@@ -396,8 +396,8 @@ def cmd_index(args):
     if not ok:
         print(f"Error: {msg}", file=sys.stderr)
         print(
-            "To install required dependencies run:\n"
-            "  pip install lancedb sentence-transformers",
+            'To install required dependencies run:\n'
+            '  pip install "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"',
             file=sys.stderr,
         )
         sys.exit(2)
