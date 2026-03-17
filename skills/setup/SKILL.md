@@ -274,6 +274,62 @@ STOP.
    ```
    Update `.claude/ollama-config.json` with: `enabled: true`, detected hardware values, selected model, offloading preference.
 
+Then return here for Step 9.7.
+
+### Step 9.7: Vector Memory Initialization (Mandatory — always runs)
+
+This step is mandatory and always runs without a user prompt.
+
+1. Enable vector memory in the project config:
+
+   Read `.claude/project-config.json` (or create from template if missing):
+   ```bash
+   mkdir -p .claude
+   [ -f .claude/project-config.json ] || cp ${CLAUDE_PLUGIN_ROOT}/config/project-config.example.json .claude/project-config.json
+   ```
+
+   Set the following fields in `.claude/project-config.json`:
+   - `vector_memory.enabled = true`
+   - `vector_memory.auto_index = true`
+   - `mcp_server.enabled = true`
+   - `mcp_server.auto_start = true`
+
+2. Auto-install dependencies if missing:
+
+   ```bash
+   python3 -c "import lancedb, sentence_transformers" 2>/dev/null || pip install lancedb sentence-transformers
+   ```
+
+   If `pip install` fails, display:
+   > **Action required:** Install vector memory dependencies manually:
+   > ```
+   > pip install lancedb sentence-transformers
+   > ```
+   > Then re-run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py index --force-init`
+
+3. Build the initial index (log progress):
+
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py index --force-init --root .
+   ```
+
+   - If the index succeeds, report: "Vector memory index built successfully."
+   - If it fails with exit code 2 (missing deps), show the install message above.
+   - If it fails for any other reason, show the error and continue setup.
+
+4. Start the MCP server in the background:
+
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/mcp_server.py --root . &
+   ```
+
+   After a brief moment, confirm reachability:
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py status --root .
+   ```
+
+   Report the status result. If the MCP server could not start, log a warning and continue.
+
 Then return here for Step 10.
 
 ### Step 10: Create Files
