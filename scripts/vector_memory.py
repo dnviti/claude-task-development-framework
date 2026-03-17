@@ -157,6 +157,10 @@ def ensure_initialized(root: Path) -> bool:
 
     Returns True if the index is ready (or was just built), False on failure.
     This is called by commands that require an existing index to operate.
+
+    A lock file (.init_in_progress) prevents concurrent initialization races
+    when multiple agents or hook invocations run simultaneously before the
+    index exists.
     """
     config = get_effective_config(root)
     index_dir = root / config["index_path"]
@@ -164,35 +168,55 @@ def ensure_initialized(root: Path) -> bool:
     if (index_dir / "lancedb").exists():
         return True
 
-    print(
-        "WARNING: Vector memory index not found. "
-        "Running initial index build now...",
-        file=sys.stderr,
-    )
-
-    ok, msg = _check_deps()
-    if not ok:
-        print(f"Cannot auto-initialize: {msg}", file=sys.stderr)
-        print(
-            "To install required dependencies run:\n"
-            "  pip install lancedb sentence-transformers",
-            file=sys.stderr,
-        )
+    # Guard against concurrent initialization using an exclusive lock file
+    index_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = index_dir / ".init_in_progress"
+    if lock_file.exists():
+        # Another process is already initializing — wait briefly then check
+        import time as _time
+        for _ in range(10):
+            _time.sleep(1)
+            if (index_dir / "lancedb").exists():
+                return True
         return False
-
-    # Build the index using a minimal args namespace
-    class _Args:
-        def __init__(self):
-            self.root = str(root)
-            self.full = True
-            self.force_init = True
 
     try:
-        cmd_index(_Args())
-        return True
-    except Exception as e:
-        print(f"Auto-initialization failed: {e}", file=sys.stderr)
-        return False
+        lock_file.touch()
+
+        print(
+            "WARNING: Vector memory index not found. "
+            "Running initial index build now...",
+            file=sys.stderr,
+        )
+
+        ok, msg = _check_deps()
+        if not ok:
+            print(f"Cannot auto-initialize: {msg}", file=sys.stderr)
+            print(
+                "To install required dependencies run:\n"
+                "  pip install lancedb sentence-transformers",
+                file=sys.stderr,
+            )
+            return False
+
+        # Build the index using a minimal args namespace
+        class _Args:
+            def __init__(self):
+                self.root = str(root)
+                self.full = True
+                self.force_init = True
+
+        try:
+            cmd_index(_Args())
+            return True
+        except Exception as e:
+            print(f"Auto-initialization failed: {e}", file=sys.stderr)
+            return False
+    finally:
+        try:
+            lock_file.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # ── Merkle Hash Tree ────────────────────────────────────────────────────────
@@ -1102,12 +1126,20 @@ def hook_file_changed(file_path: str):
 
     index_dir = root / config["index_path"]
     if not (index_dir / "lancedb").exists():
-        # Index not yet built — trigger initialization silently in background
+        # Index not yet built — trigger initialization once.
+        # Sentinel file prevents repeated full-repo scans on every hook call.
+        sentinel = index_dir / ".init_attempted"
+        if sentinel.exists():
+            return  # Already attempted; skip to avoid unbounded resource use
         try:
-            ensure_initialized(root)
+            index_dir.mkdir(parents=True, exist_ok=True)
+            sentinel.touch()
+            initialized = ensure_initialized(root)
         except Exception:
-            pass
-        return
+            return
+        if not initialized or not (index_dir / "lancedb").exists():
+            return
+        # Index now ready — fall through to index the changed file
 
     try:
         abs_path = Path(file_path).resolve()
@@ -1289,7 +1321,7 @@ def try_vector_index(root: Path, content: str, doc_name: str,
         print(f"  Indexed {len(chunks)} {doc_type} chunks into vector memory.",
               file=sys.stderr)
     except Exception:
-        pass  # Vector indexing is opt-in; failures are non-fatal
+        pass  # Failures are non-fatal to avoid blocking callers
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
