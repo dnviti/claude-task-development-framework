@@ -12,6 +12,7 @@ import argparse
 import configparser
 import json
 import os
+import platform as platform_mod
 import re
 import subprocess
 import sys
@@ -500,12 +501,30 @@ def cmd_context(_args) -> dict:
     except (ImportError, Exception):
         pass
 
+    # ── os_info ──
+    try:
+        from platform_utils import detect_python_cmd, get_shell_info
+        python_cmd = detect_python_cmd()
+        shell_info = get_shell_info()
+    except ImportError:
+        python_cmd = "python3"
+        shell_info = {"shell": "unknown", "path": None, "cat_cmd": None}
+
+    os_info = {
+        "system": platform_mod.system(),
+        "release": platform_mod.release(),
+        "python_command": python_cmd,
+        "python_version": platform_mod.python_version(),
+        "shell": shell_info,
+    }
+
     return {
         "platform": platform,
         "worktree": worktree,
         "branches": branches,
         "release_config": release_config,
         "memory_agents": memory_agents,
+        "os_info": os_info,
     }
 
 
