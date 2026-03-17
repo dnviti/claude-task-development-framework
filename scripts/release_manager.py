@@ -344,7 +344,7 @@ def get_latest_tag(tag_prefix: str) -> str | None:
             capture_output=True, text=True, check=True,
         )
         tags = [t for t in result.stdout.strip().splitlines()
-                if not re.search(r"-staging$", t)]
+                if not t.endswith("-staging")]
         return tags[0] if tags else None
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
