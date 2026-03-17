@@ -1270,8 +1270,10 @@ def should_offload_tool_call(tool_name: str, tool_args: str, level: int) -> bool
     if level <= 0:
         return False
 
-    # S1: Normalize whitespace before pattern matching to prevent bypass via extra spaces
-    # Apply NFKC to canonicalize Unicode homoglyphs (e.g. fullwidth space U+3000, Cyrillic lookalikes)
+    # S1: Normalize whitespace before pattern matching to prevent bypass via extra spaces.
+    # Apply NFKC to canonicalize Unicode compatibility equivalences (e.g. fullwidth space U+3000,
+    # fullwidth Latin letters, superscripts, ligatures).  Note: NFKC does NOT map cross-script
+    # visual lookalikes such as Cyrillic А → Latin A; those require a separate confusables check.
     args_normalized = " ".join(unicodedata.normalize("NFKC", tool_args).split()) if tool_args else ""
 
     if level >= 10:
@@ -1307,8 +1309,10 @@ def should_offload_tool_call(tool_name: str, tool_args: str, level: int) -> bool
             for kw in simple_bash_keywords:
                 if kw in args_lower:
                     return True
-            # Single simple command (no pipes, redirects, semicolons)
-            if not any(c in tool_args for c in ["|", ">", "<", ";", "&&", "||"]):
+            # Single simple command (no pipes, redirects, semicolons).
+            # Use args_normalized (post-NFKC) so fullwidth metacharacters (e.g. U+FF5C ｜)
+            # cannot bypass this check — SEC-1 fix.
+            if not any(c in args_normalized for c in ["|", ">", "<", ";", "&&", "||"]):
                 return True
         return False
 
