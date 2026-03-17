@@ -78,30 +78,6 @@ def _load_config() -> dict:
     return {}
 
 
-def _get_offload_level(config: dict) -> int:
-    """Extract the numeric offload level from the Ollama config.
-
-    Mirrors ``agent_runner.get_offload_level()`` to stay self-contained.
-    """
-    if not config.get("enabled", False):
-        return 0
-
-    offloading_cfg = config.get("offloading", {})
-
-    if "level" in offloading_cfg:
-        raw = offloading_cfg["level"]
-        if isinstance(raw, bool):
-            return 5 if raw else 0
-        if isinstance(raw, (int, float)):
-            return max(0, min(10, int(raw)))
-
-    # Legacy boolean field
-    if "enabled" in offloading_cfg:
-        return 5 if offloading_cfg["enabled"] else 0
-
-    return 0
-
-
 def _tool_calls_enabled(config: dict, tool_name: str) -> bool:
     """Check whether tool call offloading is enabled for the given tool."""
     offloading_cfg = config.get("offloading", {})
@@ -122,9 +98,10 @@ def _matches_exclude_patterns(config: dict, tool_args: str) -> bool:
     offloading_cfg = config.get("offloading", {})
     tool_calls_cfg = offloading_cfg.get("tool_calls", {})
     exclude_patterns = tool_calls_cfg.get("exclude_patterns", [])
-    args_lower = tool_args.lower()
+    # S1: Collapse whitespace to prevent bypass via extra spaces or homoglyphs
+    args_lower = " ".join(tool_args.split()).lower()
     for pattern in exclude_patterns:
-        if pattern.lower() in args_lower:
+        if " ".join(pattern.split()).lower() in args_lower:
             return True
     return False
 
@@ -144,7 +121,19 @@ def evaluate(tool_name: str, tool_args: str) -> None:
     tool_args = tool_args[:_MAX_TOOL_ARGS_INSPECT]
 
     config = _load_config()
-    level = _get_offload_level(config)
+
+    # O2: Import and reuse get_offload_level from ollama_manager instead of local duplicate
+    try:
+        from ollama_manager import get_offload_level, should_offload_tool_call
+        level = get_offload_level(config)
+    except ImportError as exc:
+        # Graceful degradation: if ollama_manager is unavailable, do not offload
+        print(
+            json.dumps({"action": "proceed", "reason": f"import_error: {exc}"}),
+            file=sys.stderr,
+        )
+        print(json.dumps({"action": "proceed"}))
+        sys.exit(0)
 
     # If tool call offloading is not active, pass through immediately
     if level <= 0 or not _tool_calls_enabled(config, tool_name):
@@ -156,18 +145,6 @@ def evaluate(tool_name: str, tool_args: str) -> None:
         print(json.dumps({"action": "proceed", "reason": "excluded_pattern"}))
         sys.exit(0)
 
-    # Import offloading logic
-    try:
-        from ollama_manager import should_offload_tool_call
-    except ImportError as exc:
-        # Graceful degradation: if ollama_manager is unavailable, do not offload
-        print(
-            json.dumps({"action": "proceed", "reason": f"import_error: {exc}"}),
-            file=sys.stderr,
-        )
-        print(json.dumps({"action": "proceed"}))
-        sys.exit(0)
-
     should = should_offload_tool_call(tool_name, tool_args, level)
 
     if not should:
@@ -177,6 +154,13 @@ def evaluate(tool_name: str, tool_args: str) -> None:
     # Build offload payload
     ollama_model = config.get("model") or "qwen2.5-coder:7b"
     api_base = config.get("api_base", "http://localhost:11434")
+
+    # S3: Warn if api_base does not use http:// or https:// (warning-only, do not block)
+    if not (api_base.startswith("http://") or api_base.startswith("https://")):
+        print(
+            json.dumps({"warning": f"api_base '{api_base}' does not start with http:// or https://"}),
+            file=sys.stderr,
+        )
 
     result = {
         "action": "offload",

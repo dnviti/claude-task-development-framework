@@ -669,6 +669,8 @@ def compute_offload_score(task_description: str) -> int:
     Returns:
         Integer score 0-10.
     """
+    # O1: Normalize input to ensure consistent scoring regardless of casing/whitespace
+    task_description = " ".join(task_description.strip().split())
     description_lower = task_description.lower()
 
     # Critical overrides everything
@@ -751,16 +753,20 @@ def should_offload_tool_call(tool_name: str, tool_args: str, level: int) -> bool
     """
     if level <= 0:
         return False
+
+    # S1: Normalize whitespace before pattern matching to prevent bypass via extra spaces
+    args_normalized = " ".join(tool_args.split()) if tool_args else ""
+
     if level >= 10:
         # Even at level 10, exclude dangerous destructive commands
-        args_lower = tool_args.lower()
+        args_lower = args_normalized.lower()
         for pattern in _ALWAYS_EXCLUDED_PATTERNS:
             if pattern in args_lower:
                 return False
         return True
 
     tool_upper = tool_name.upper() if tool_name else ""
-    args_lower = tool_args.lower() if tool_args else ""
+    args_lower = args_normalized.lower()
 
     if tool_upper == "BASH":
         # Excluded / dangerous patterns — never offload regardless of level
@@ -818,6 +824,34 @@ def should_offload_tool_call(tool_name: str, tool_args: str, level: int) -> bool
 
     # Unknown tools: conservative — do not offload
     return False
+
+
+def get_offload_level(config: dict) -> int:
+    """Extract the numeric offload level from the Ollama config dict.
+
+    Args:
+        config: The Ollama configuration dictionary (as loaded from ollama-config.json).
+
+    Returns:
+        Integer offload level 0-10. Returns 0 if offloading is disabled or not configured.
+    """
+    if not config.get("enabled", False):
+        return 0
+
+    offloading_cfg = config.get("offloading", {})
+
+    if "level" in offloading_cfg:
+        raw = offloading_cfg["level"]
+        if isinstance(raw, bool):
+            return 5 if raw else 0
+        if isinstance(raw, (int, float)):
+            return max(0, min(10, int(raw)))
+
+    # Legacy boolean field
+    if "enabled" in offloading_cfg:
+        return 5 if offloading_cfg["enabled"] else 0
+
+    return 0
 
 
 def is_offloadable(task_description: str) -> bool:
