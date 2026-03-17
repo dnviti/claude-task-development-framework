@@ -313,7 +313,7 @@ mkdir -p .claude
 cp ${CLAUDE_PLUGIN_ROOT}/config/project-config.example.json .claude/project-config.json
 ```
 
-Then return here for the next step.
+Then return here for Step 9.8.
 
 ### Step 9.8: Social Posting Configuration (Optional)
 
@@ -351,12 +351,14 @@ STOP.
    - **Discord:** "Enter the env var name for your Discord webhook URL (e.g. `CTDF_DISCORD_WEBHOOK`):"
    - **Slack:** "Enter the env var name for your Slack webhook URL (e.g. `CTDF_SLACK_WEBHOOK`):"
 
+   > **Important:** Enter only the environment variable **name** (e.g. `CTDF_BLUESKY_HANDLE`), never the actual secret value. Storing secrets in project config would expose them to version control.
+
    Store only the env var **names** (never the values) in project config. Inform: "Set `<ENV_VAR>=<value>` in your shell profile or `.env` file."
 
    Set `"enabled": true` for each configured platform.
 
 4. **For each selected clipboard platform** (Twitter/X, LinkedIn, Reddit, Hacker News):
-   - Set `"enabled": true` in `social_announce.clipboard_platforms`
+   - In the `social_announce.clipboard_platforms` array, find the object whose `"name"` matches the selected platform (e.g. `"twitter"`, `"linkedin"`, `"reddit"`, `"hackernews"`) and set its `"enabled": true`
    - No credentials needed
 
 5. Ensure `.claude/project-config.json` exists (copy from example if not — see Step 9.6), then update the `social_announce` section using the Edit or Write tool.
