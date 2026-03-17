@@ -29,10 +29,8 @@ Zero external dependencies -- stdlib only.
 import argparse
 import hashlib
 import json
-import os
 import re
 import sys
-import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -57,8 +55,15 @@ FRONTMATTER_RE = re.compile(
     re.DOTALL,
 )
 
-# Simple YAML key: value parser (avoids PyYAML dependency)
+# Simple YAML key: value parser (avoids PyYAML dependency).
+# NOTE: Only handles flat key: value pairs; multi-line/nested YAML is not supported.
 YAML_KV_RE = re.compile(r'^(\w[\w-]*):\s*"?([^"]*?)"?\s*$', re.MULTILINE)
+
+# Pre-compiled regex for replacing idempotency marker blocks
+MARKER_BLOCK_RE = re.compile(
+    re.escape(MARKER_START) + r".*?" + re.escape(MARKER_END),
+    re.DOTALL,
+)
 
 SUPPORTED_TARGETS = [
     "opencode",
@@ -157,12 +162,8 @@ def _wrap_with_markers(content: str, content_hash: str) -> str:
 
 def _replace_marker_block(existing: str, new_block: str) -> str:
     """Replace the marked block in existing content, or append if absent."""
-    pattern = re.compile(
-        re.escape(MARKER_START) + r".*?" + re.escape(MARKER_END),
-        re.DOTALL,
-    )
-    if pattern.search(existing):
-        return pattern.sub(new_block, existing)
+    if MARKER_BLOCK_RE.search(existing):
+        return MARKER_BLOCK_RE.sub(new_block, existing)
     # Not found -- append
     return existing.rstrip() + "\n\n" + new_block + "\n"
 
@@ -236,6 +237,19 @@ def _load_template(name: str) -> str:
     return tmpl_path.read_text(encoding="utf-8")
 
 
+def _escape_js_string(value: str) -> str:
+    """Escape a string for safe embedding inside a JS string literal."""
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("'", "\\'")
+        .replace("`", "\\`")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("${", "\\${")
+    )
+
+
 def _render_template(template: str, variables: dict[str, str]) -> str:
     """Render a template by replacing {{VAR}} placeholders."""
     result = template
@@ -283,9 +297,9 @@ def _to_opencode(skills: list[dict[str, Any]], output_dir: Path) -> list[str]:
 
     for skill in skills:
         variables = {
-            "SKILL_NAME": skill["name"],
-            "SKILL_DESCRIPTION": skill["description"],
-            "SKILL_ARGUMENT_HINT": skill["frontmatter"].get("argument-hint", ""),
+            "SKILL_NAME": _escape_js_string(skill["name"]),
+            "SKILL_DESCRIPTION": _escape_js_string(skill["description"]),
+            "SKILL_ARGUMENT_HINT": _escape_js_string(skill["frontmatter"].get("argument-hint", "")),
         }
         rendered = _render_template(js_tmpl, variables)
         js_path = plugins_dir / f"{skill['name']}.js"
@@ -382,10 +396,17 @@ def _to_continue(skills: list[dict[str, Any]], output_dir: Path) -> list[str]:
     created: list[str] = []
 
     for skill in skills:
+        body = skill["body"]
+        if len(body) > 2000:
+            _info(
+                f"  WARNING: skill '{skill['name']}' body truncated from "
+                f"{len(body)} to 2000 chars for Continue.dev size limit."
+            )
+            body = body[:2000]
         assistant = {
             "name": f"CTDF {skill['name'].title()}",
             "description": skill["description"],
-            "instructions": skill["body"][:2000],  # Continue has size limits
+            "instructions": body,
             "slash_command": f"/{skill['name']}",
         }
         if skill["frontmatter"].get("argument-hint"):

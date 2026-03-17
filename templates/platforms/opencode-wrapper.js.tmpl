@@ -9,7 +9,7 @@
  * Usage: /{{SKILL_NAME}} {{SKILL_ARGUMENT_HINT}}
  */
 
-const { execSync } = require("child_process");
+const { execFileSync } = require("child_process");
 const path = require("path");
 
 const SKILL_NAME = "{{SKILL_NAME}}";
@@ -17,7 +17,7 @@ const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
 
 module.exports = {
   name: `ctdf-${SKILL_NAME}`,
-  description: "{{SKILL_DESCRIPTION}}",
+  description: `{{SKILL_DESCRIPTION}}`.replace(/[^\x20-\x7E]/g, ""),
 
   /**
    * Execute the CTDF skill by delegating to skill_helper.py.
@@ -29,10 +29,9 @@ module.exports = {
   execute(context) {
     const args = context.args || "";
     const helperPath = path.join(PROJECT_ROOT, "scripts", "skill_helper.py");
-    const cmd = `python3 "${helperPath}" dispatch --skill ${SKILL_NAME} --args "${args}"`;
 
     try {
-      const output = execSync(cmd, {
+      const output = execFileSync("python3", [helperPath, "dispatch", "--skill", SKILL_NAME, "--args", args], {
         cwd: PROJECT_ROOT,
         encoding: "utf-8",
         timeout: 120000,
