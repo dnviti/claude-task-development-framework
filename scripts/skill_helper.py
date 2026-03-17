@@ -486,11 +486,26 @@ def cmd_context(_args) -> dict:
         "test_framework": md_vars.get("TEST_FRAMEWORK", ""),
     }
 
+    # ── memory_agents ──
+    memory_agents = {
+        "active_agents": 0,
+        "pending_conflicts": 0,
+    }
+    try:
+        from memory_protocol import MemoryProtocol
+        protocol = MemoryProtocol(root)
+        proto_status = protocol.get_status()
+        memory_agents["active_agents"] = proto_status.get("active_agents", 0)
+        memory_agents["pending_conflicts"] = proto_status.get("pending_conflicts", 0)
+    except (ImportError, Exception):
+        pass
+
     return {
         "platform": platform,
         "worktree": worktree,
         "branches": branches,
         "release_config": release_config,
+        "memory_agents": memory_agents,
     }
 
 

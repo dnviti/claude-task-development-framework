@@ -19,6 +19,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Add scripts/ to path for sibling imports
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
 
 # ── Constants ───────────────────────────────────────────────────────────────
 
@@ -656,6 +661,44 @@ def build_shell_command(
     return ""
 
 
+# ── Memory Protocol Integration ────────────────────────────────────────────
+
+def _register_agent(pipeline: str, task_code: str = "") -> tuple[str, str]:
+    """Register an agent with the memory consistency protocol.
+
+    Returns (agent_id, session_id).  If memory_protocol is not available,
+    returns empty strings (graceful degradation).
+    """
+    try:
+        from memory_protocol import MemoryProtocol, generate_agent_id
+
+        root = Path.cwd()
+        protocol = MemoryProtocol(root)
+        agent_id = generate_agent_id(prefix=pipeline)
+        session = protocol.register_agent(
+            agent_id=agent_id,
+            agent_type=pipeline,
+            task_code=task_code,
+        )
+        return agent_id, session.session_id
+    except (ImportError, Exception):
+        return "", ""
+
+
+def _deregister_agent(session_id: str):
+    """Deregister an agent session on completion."""
+    if not session_id:
+        return
+    try:
+        from memory_protocol import MemoryProtocol
+
+        root = Path.cwd()
+        protocol = MemoryProtocol(root)
+        protocol.deregister_agent(session_id)
+    except (ImportError, Exception):
+        pass
+
+
 # ── Main Runner ─────────────────────────────────────────────────────────────
 
 def run_agent(
@@ -688,14 +731,14 @@ def run_agent(
             print(f"  [dry-run] Warning: {env_key} is not set (would fail in real run).")
 
     # 3. Install CLI
-    print("[1/4] Installing CLI...")
+    print("[1/5] Installing CLI...")
     if not dry_run:
         install_cli(provider)
     else:
         print(f"  [dry-run] Would install: {PROVIDER_NPM_PKG[provider]}")
 
     # 4. Setup plugin
-    print("[2/4] Setting up plugin...")
+    print("[2/5] Setting up plugin...")
     if not dry_run:
         setup_plugin(provider)
     else:
@@ -704,8 +747,24 @@ def run_agent(
         else:
             print(f"  [dry-run] Skipping plugin setup (not needed for {provider}).")
 
-    # 5. Build prompt
-    print("[3/4] Building prompt...")
+    # 5. Register agent with memory protocol
+    print("[3/5] Registering agent with memory protocol...")
+    agent_id, session_id = "", ""
+    if not dry_run:
+        agent_id, session_id = _register_agent(pipeline)
+        if agent_id:
+            print(f"  Agent registered: {agent_id} (session={session_id})")
+            # Set env vars so child processes inherit agent identity
+            os.environ["CTDF_AGENT_ID"] = agent_id
+            os.environ["CTDF_SESSION_ID"] = session_id
+            os.environ["CTDF_AGENT_TYPE"] = pipeline
+        else:
+            print("  Memory protocol not available — running without coordination.")
+    else:
+        print("  [dry-run] Would register agent with memory protocol.")
+
+    # 6. Build prompt
+    print("[4/5] Building prompt...")
     auto_pr = config.get("auto_pr", True)
     if pipeline == "task":
         print(f"  Auto-PR: {'enabled' if auto_pr else 'disabled'}")
@@ -721,8 +780,8 @@ def run_agent(
         print(f"  [dry-run] Prompt preview (first 200 chars):")
         print(f"    {prompt[:200]}...")
 
-    # 6. Invoke agent
-    print("[4/4] Invoking agent...")
+    # 7. Invoke agent
+    print("[5/5] Invoking agent...")
     shell_cmd = build_shell_command(provider, prompt_file, model, budget, pipeline)
 
     if dry_run:
@@ -738,6 +797,9 @@ def run_agent(
         shell=True,
         cwd=os.getcwd(),
     )
+
+    # Deregister agent from memory protocol
+    _deregister_agent(session_id)
 
     if result.returncode != 0:
         print(

@@ -487,6 +487,18 @@ TM remove-worktree --task-code <CODE>
 ```
 for every task worktree associated with this release.
 
+**9d-bis.** Run vector memory garbage collection to clean up stale entries, orphaned agent sessions, and compact the index:
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py gc --json
+```
+On failure, warn but do not block — GC is best-effort cleanup.
+
+**9d-ter.** Deregister all agent sessions spawned during this release:
+```bash
+TM deregister-agent --session-id <SESSION_ID>
+```
+for every agent session created during Stage 4 sub-agent spawning.
+
 **9e.** Final report table:
 
 | Stage | Status |
