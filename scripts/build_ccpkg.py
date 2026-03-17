@@ -235,15 +235,13 @@ def discover_hooks() -> list[dict[str, Any]]:
         result = []
         for event_name, hook_list in hooks_config.items():
             for hook_entry in hook_list:
+                hook_defs = hook_entry.get("hooks", [])
+                first_hook = hook_defs[0] if hook_defs else {}
                 result.append({
                     "event": event_name,
                     "matcher": hook_entry.get("matcher", "*"),
-                    "type": hook_entry.get("hooks", [{}])[0].get("type", "command")
-                    if hook_entry.get("hooks")
-                    else "command",
-                    "command": hook_entry.get("hooks", [{}])[0].get("command", "")
-                    if hook_entry.get("hooks")
-                    else "",
+                    "type": first_hook.get("type", "command"),
+                    "command": first_hook.get("command", ""),
                 })
         return result
     except (json.JSONDecodeError, OSError):
@@ -267,7 +265,14 @@ def collect_files() -> list[tuple[Path, str]]:
         for file_path in sorted(dir_path.rglob("*")):
             if not file_path.is_file():
                 continue
-            rel = file_path.relative_to(REPO_ROOT)
+            # Guard against symlinks pointing outside the repo root
+            try:
+                resolved = file_path.resolve()
+                if not str(resolved).startswith(str(REPO_ROOT.resolve())):
+                    continue
+                rel = file_path.relative_to(REPO_ROOT)
+            except (ValueError, OSError):
+                continue
             rel_str = str(rel).replace(os.sep, "/")
             if not is_excluded(rel_str):
                 files.append((file_path, rel_str))
