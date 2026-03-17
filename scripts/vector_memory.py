@@ -19,7 +19,7 @@ during /setup and updated on every file write via the PostToolUse hook.
 Missing configuration is treated as enabled (always-on default).
 
 Required dependencies: lancedb, sentence-transformers
-Install with: pip install lancedb sentence-transformers
+Install with: pip install "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"
 
 Zero stdlib dependencies — stdlib only for core logic. Required for indexing:
 lancedb, sentence-transformers (or onnxruntime+tokenizers), numpy, pyarrow.
@@ -193,21 +193,15 @@ def ensure_initialized(root: Path) -> bool:
         if not ok:
             print(f"Cannot auto-initialize: {msg}", file=sys.stderr)
             print(
-                "To install required dependencies run:\n"
-                "  pip install lancedb sentence-transformers",
+                'To install required dependencies run:\n'
+                '  pip install "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"',
                 file=sys.stderr,
             )
             return False
 
         # Build the index using a minimal args namespace
-        class _Args:
-            def __init__(self):
-                self.root = str(root)
-                self.full = True
-                self.force_init = True
-
         try:
-            cmd_index(_Args())
+            cmd_index(argparse.Namespace(root=str(root), full=True, force_init=True))
             return True
         except Exception as e:
             print(f"Auto-initialization failed: {e}", file=sys.stderr)
@@ -315,7 +309,7 @@ def _check_deps() -> tuple[bool, str]:
             if not msg:
                 msg = (
                     "Missing required dependencies for vector memory.\n"
-                    "Install with: pip install lancedb sentence-transformers"
+                    'Install with: pip install "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"'
                 )
             return False, msg
         return True, ""
@@ -402,8 +396,8 @@ def cmd_index(args):
     if not ok:
         print(f"Error: {msg}", file=sys.stderr)
         print(
-            "To install required dependencies run:\n"
-            "  pip install lancedb sentence-transformers",
+            'To install required dependencies run:\n'
+            '  pip install "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"',
             file=sys.stderr,
         )
         sys.exit(2)

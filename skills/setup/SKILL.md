@@ -297,13 +297,13 @@ This step is mandatory and always runs without a user prompt.
 2. Auto-install dependencies if missing:
 
    ```bash
-   python3 -c "import lancedb, sentence_transformers" 2>/dev/null || pip install lancedb sentence-transformers
+   python3 -c "import lancedb, sentence_transformers" 2>/dev/null || pip install "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"
    ```
 
    If `pip install` fails, display:
    > **Action required:** Install vector memory dependencies manually:
    > ```
-   > pip install lancedb sentence-transformers
+   > pip install "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"
    > ```
    > Then re-run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py index --force-init`
 
