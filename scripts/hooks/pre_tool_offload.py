@@ -22,6 +22,7 @@ Zero external dependencies — stdlib only.
 import json
 import os
 import sys
+import unicodedata
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -98,10 +99,13 @@ def _matches_exclude_patterns(config: dict, tool_args: str) -> bool:
     offloading_cfg = config.get("offloading", {})
     tool_calls_cfg = offloading_cfg.get("tool_calls", {})
     exclude_patterns = tool_calls_cfg.get("exclude_patterns", [])
-    # S1: Collapse whitespace to prevent bypass via extra spaces or homoglyphs
-    args_lower = " ".join(tool_args.split()).lower()
+    # S1: Collapse whitespace to prevent bypass via extra spaces.
+    # Apply NFKC to canonicalize Unicode compatibility equivalences (e.g. fullwidth space U+3000,
+    # fullwidth Latin letters, superscripts, ligatures).  Note: NFKC does NOT cover cross-script
+    # visual lookalikes such as Cyrillic А → Latin A; those require a separate confusables check.
+    args_lower = " ".join(unicodedata.normalize("NFKC", tool_args).split()).lower()
     for pattern in exclude_patterns:
-        if " ".join(pattern.split()).lower() in args_lower:
+        if " ".join(unicodedata.normalize("NFKC", pattern).split()).lower() in args_lower:
             return True
     return False
 
