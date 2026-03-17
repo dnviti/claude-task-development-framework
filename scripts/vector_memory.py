@@ -25,9 +25,11 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Optional
 
@@ -40,6 +42,22 @@ from analyzers import (
     ALWAYS_SKIP, EXTENSION_MAP, load_gitignore_patterns, is_ignored,
     walk_source_files, read_file_safe, classify_file_role,
 )
+
+
+# ── Sanitization ─────────────────────────────────────────────────────────────
+
+def _sanitize_filter_value(value: str) -> str:
+    """Sanitize a string value for use in LanceDB filter expressions.
+
+    Escapes single quotes and strips characters that could alter query
+    semantics, preventing filter-injection attacks.
+    """
+    # Replace single quotes with escaped single quotes
+    sanitized = value.replace("'", "''")
+    # Remove semicolons and SQL comment markers
+    sanitized = re.sub(r"[;]", "", sanitized)
+    sanitized = re.sub(r"--", "", sanitized)
+    return sanitized
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -331,7 +349,7 @@ def cmd_index(args):
           f"(dim={provider.dimension()})", file=sys.stderr)
 
     # Perform writes under lock if available
-    _ctx = lock.write() if lock else _nullcontext()
+    _ctx = lock.write() if lock else nullcontext()
     with _ctx:
         # Open vector DB
         db = _open_db(index_dir)
@@ -341,7 +359,7 @@ def cmd_index(args):
         if files_to_remove:
             for fp in files_to_remove:
                 try:
-                    table.delete(f"file_path = '{fp}'")
+                    table.delete(f"file_path = '{_sanitize_filter_value(fp)}'")
                 except Exception:
                     pass
 
@@ -349,7 +367,7 @@ def cmd_index(args):
         if not args.full:
             for fp in files_to_index:
                 try:
-                    table.delete(f"file_path = '{fp}'")
+                    table.delete(f"file_path = '{_sanitize_filter_value(fp)}'")
                 except Exception:
                     pass
         else:
@@ -423,12 +441,7 @@ def cmd_index(args):
           f"in {elapsed:.1f}s", file=sys.stderr)
 
 
-class _nullcontext:
-    """Minimal no-op context manager for Python 3.6 compat."""
-    def __enter__(self):
-        return self
-    def __exit__(self, *args):
-        pass
+# _nullcontext removed — use contextlib.nullcontext (Python 3.7+)
 
 
 def _flush_batch(table, provider, cache, records: list[dict],
@@ -445,9 +458,8 @@ def _flush_batch(table, provider, cache, records: list[dict],
 
 def _save_meta(index_dir: Path, config: dict, file_count: int):
     """Save index metadata."""
-    import time as _time
     meta = {
-        "last_indexed": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+        "last_indexed": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "file_count": file_count,
         "embedding_provider": config.get("embedding_provider", "local"),
         "embedding_model": config.get("embedding_model", "all-MiniLM-L6-v2"),
@@ -506,7 +518,7 @@ def cmd_search(args):
     except ImportError:
         pass
 
-    _ctx = lock.read() if lock else _nullcontext()
+    _ctx = lock.read() if lock else nullcontext()
     with _ctx:
         db = _open_db(index_dir)
 
@@ -527,11 +539,13 @@ def cmd_search(args):
 
         results = table.search(query_embedding).limit(top_k * 3)
 
-        # Apply filters
+        # Apply filters (sanitized to prevent filter injection)
         if file_filter:
-            results = results.where(f"file_path LIKE '%{file_filter}%'")
+            safe_filter = _sanitize_filter_value(file_filter)
+            results = results.where(f"file_path LIKE '%{safe_filter}%'")
         if type_filter:
-            results = results.where(f"chunk_type = '{type_filter}'")
+            safe_type = _sanitize_filter_value(type_filter)
+            results = results.where(f"chunk_type = '{safe_type}'")
 
         df = results.limit(top_k).to_pandas()
 
@@ -1026,14 +1040,14 @@ def hook_file_changed(file_path: str):
         except ImportError:
             pass
 
-        _ctx = lock.write() if lock else _nullcontext()
+        _ctx = lock.write() if lock else nullcontext()
         with _ctx:
             db = _open_db(index_dir)
             table = _get_or_create_table(db, provider.dimension())
 
             # Remove old entries for this file
             try:
-                table.delete(f"file_path = '{rel_path}'")
+                table.delete(f"file_path = '{_sanitize_filter_value(rel_path)}'")
             except Exception:
                 pass
 

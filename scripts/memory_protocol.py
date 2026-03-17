@@ -527,20 +527,25 @@ class MemoryProtocol:
         parent_session: Optional[str] = None,
     ) -> AgentSession:
         """Register a new agent session."""
+        # Sanitize values before setting as env vars to prevent injection
+        safe_agent_id = _sanitize_identifier(agent_id)
+        safe_agent_type = _sanitize_identifier(agent_type)
+        safe_task_code = _sanitize_identifier(task_code)
+
         session = AgentSession(
-            agent_id=agent_id,
-            agent_type=agent_type,
-            task_code=task_code,
+            agent_id=safe_agent_id,
+            agent_type=safe_agent_type,
+            task_code=safe_task_code,
             parent_session=parent_session,
         )
         self.registry.register(session)
 
         # Set environment variables for child processes
-        os.environ["CTDF_AGENT_ID"] = agent_id
+        os.environ["CTDF_AGENT_ID"] = safe_agent_id
         os.environ["CTDF_SESSION_ID"] = session.session_id
-        os.environ["CTDF_AGENT_TYPE"] = agent_type
-        if task_code:
-            os.environ["CTDF_TASK_CODE"] = task_code
+        os.environ["CTDF_AGENT_TYPE"] = safe_agent_type
+        if safe_task_code:
+            os.environ["CTDF_TASK_CODE"] = safe_task_code
 
         return session
 
@@ -633,10 +638,22 @@ class MemoryProtocol:
 
 # ── Generate Agent ID ────────────────────────────────────────────────────────
 
+def _sanitize_identifier(value: str) -> str:
+    """Sanitize a string for use as an identifier or env var value.
+
+    Strips any characters outside alphanumerics, hyphens, underscores,
+    and dots to prevent injection via environment variables or file paths.
+    """
+    import re
+    return re.sub(r"[^a-zA-Z0-9._-]", "", value)
+
+
 def generate_agent_id(prefix: str = "agent") -> str:
     """Generate a unique agent ID.
 
     Format: {prefix}-{short_uuid}-{pid}
+    The prefix is sanitized to prevent injection of special characters.
     """
+    safe_prefix = _sanitize_identifier(prefix) or "agent"
     short_id = str(uuid.uuid4())[:8]
-    return f"{prefix}-{short_id}-{os.getpid()}"
+    return f"{safe_prefix}-{short_id}-{os.getpid()}"

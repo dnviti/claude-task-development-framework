@@ -234,16 +234,14 @@ class MemoryLock:
 
     def _acquire(self, exclusive: bool):
         """Acquire the lock with timeout and deadlock detection."""
-        # Create lock file if needed
-        if not self._lock_file.exists():
-            self._lock_file.touch()
-
-        # Open the lock file
+        # Open (and atomically create) the lock file — O_CREAT handles
+        # creation so no separate exists()/touch() is needed, avoiding
+        # a TOCTOU race between the check and the open.
         if _IS_WINDOWS:
             self._fd = os.open(str(self._lock_file), os.O_RDWR | os.O_CREAT)
         else:
             flags = os.O_RDWR | os.O_CREAT
-            self._fd = os.open(str(self._lock_file), flags, 0o666)
+            self._fd = os.open(str(self._lock_file), flags, 0o644)
 
         start = time.monotonic()
         deadlock_warned = False
