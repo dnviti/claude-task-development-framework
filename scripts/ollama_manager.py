@@ -14,6 +14,7 @@ import platform
 import re
 import subprocess
 import sys
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1270,7 +1271,8 @@ def should_offload_tool_call(tool_name: str, tool_args: str, level: int) -> bool
         return False
 
     # S1: Normalize whitespace before pattern matching to prevent bypass via extra spaces
-    args_normalized = " ".join(tool_args.split()) if tool_args else ""
+    # Apply NFKC to canonicalize Unicode homoglyphs (e.g. fullwidth space U+3000, Cyrillic lookalikes)
+    args_normalized = " ".join(unicodedata.normalize("NFKC", tool_args).split()) if tool_args else ""
 
     if level >= 10:
         # Even at level 10, exclude dangerous destructive commands
