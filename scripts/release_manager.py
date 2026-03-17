@@ -196,9 +196,10 @@ def write_version_to_pyproject(filepath: Path, new_version: str) -> bool:
     """Update version in pyproject.toml via regex replacement."""
     try:
         content = filepath.read_text(encoding="utf-8")
+        escaped = re.escape(new_version)
         new_content = re.sub(
             r'(version\s*=\s*")[^"]+(")',
-            rf"\g<1>{new_version}\2",
+            rf"\g<1>{escaped}\2",
             content,
             count=1,
         )
@@ -223,9 +224,10 @@ def write_version_to_cargo(filepath: Path, new_version: str) -> bool:
             if in_package and line.strip().startswith("["):
                 break
             if in_package and re.match(r'version\s*=\s*"[^"]+"', line.strip()):
+                escaped = re.escape(new_version)
                 lines[i] = re.sub(
                     r'(version\s*=\s*")[^"]+(")',
-                    rf"\g<1>{new_version}\2",
+                    rf"\g<1>{escaped}\2",
                     line,
                 )
                 filepath.write_text("".join(lines), encoding="utf-8")
@@ -239,9 +241,10 @@ def write_version_to_setup_py(filepath: Path, new_version: str) -> bool:
     """Update version in setup.py."""
     try:
         content = filepath.read_text(encoding="utf-8")
+        escaped = re.escape(new_version)
         new_content = re.sub(
             r"""(version\s*=\s*['"])[^'"]+(['"])""",
-            rf"\g<1>{new_version}\2",
+            rf"\g<1>{escaped}\2",
             content,
             count=1,
         )
@@ -257,9 +260,10 @@ def write_version_to_setup_cfg(filepath: Path, new_version: str) -> bool:
     """Update version in setup.cfg [metadata] section."""
     try:
         content = filepath.read_text(encoding="utf-8")
+        escaped = re.escape(new_version)
         new_content = re.sub(
             r"(version\s*=\s*)\S+",
-            rf"\g<1>{new_version}",
+            rf"\g<1>{escaped}",
             content,
             count=1,
         )
@@ -275,11 +279,12 @@ def write_version_to_pom_xml(filepath: Path, new_version: str) -> bool:
     """Update top-level <version> in pom.xml."""
     try:
         content = filepath.read_text(encoding="utf-8")
-        # Match first <version> that is a direct child of <project>
-        # (before any <dependencies>, <build>, <parent> sections)
+        # Match first <version> in the file (may not be the project version
+        # if <parent> appears first — see review note)
+        escaped = re.escape(new_version)
         new_content = re.sub(
             r"(<version>)[^<]+(</version>)",
-            rf"\g<1>{new_version}\2",
+            rf"\g<1>{escaped}\2",
             content,
             count=1,
         )
@@ -295,9 +300,10 @@ def write_version_to_build_gradle(filepath: Path, new_version: str) -> bool:
     """Update version in build.gradle."""
     try:
         content = filepath.read_text(encoding="utf-8")
+        escaped = re.escape(new_version)
         new_content = re.sub(
             r"""(version\s*=\s*['"])[^'"]+(['"])""",
-            rf"\g<1>{new_version}\2",
+            rf"\g<1>{escaped}\2",
             content,
             count=1,
         )
@@ -321,7 +327,7 @@ MANIFEST_WRITERS = {
 
 # Filenames to auto-discover when no explicit package_paths configured
 AUTO_DISCOVER_MANIFESTS = [
-    "package.json", "pyproject.toml", "setup.cfg",
+    "package.json", "pyproject.toml", "setup.py", "setup.cfg",
     "Cargo.toml", "pom.xml", "build.gradle",
 ]
 
@@ -490,6 +496,7 @@ def cmd_update_versions(args):
 
     updated = []
     skipped = []
+    readers = dict(MANIFEST_READERS)
 
     for filepath in manifests:
         filename = filepath.name
@@ -498,7 +505,7 @@ def cmd_update_versions(args):
             continue
 
         # Read current version
-        reader = dict(MANIFEST_READERS).get(filename)
+        reader = readers.get(filename)
         if not reader and filepath.suffix == ".json":
             reader = read_version_from_package_json
         if reader:
