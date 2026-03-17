@@ -200,14 +200,8 @@ def ensure_initialized(root: Path) -> bool:
             return False
 
         # Build the index using a minimal args namespace
-        class _Args:
-            def __init__(self):
-                self.root = str(root)
-                self.full = True
-                self.force_init = True
-
         try:
-            cmd_index(_Args())
+            cmd_index(argparse.Namespace(root=str(root), full=True, force_init=True))
             return True
         except Exception as e:
             print(f"Auto-initialization failed: {e}", file=sys.stderr)
