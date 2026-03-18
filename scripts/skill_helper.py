@@ -865,6 +865,11 @@ def dispatch_help(parts: list[str]) -> dict:
     return {"flow": "query", "task_code": "", "remaining_args": " ".join(parts)}
 
 
+def dispatch_crazy(parts: list[str]) -> dict:
+    """Dispatch for the crazy skill. Always returns flow 'build' and yolo True."""
+    return {"flow": "build", "task_code": "", "remaining_args": " ".join(parts), "yolo": True}
+
+
 DISPATCHERS = {
     "task": dispatch_task,
     "idea": dispatch_idea,
@@ -875,6 +880,7 @@ DISPATCHERS = {
     "docs": dispatch_docs,
     "tests": dispatch_tests,
     "help": dispatch_help,
+    "crazy": dispatch_crazy,
 }
 
 
