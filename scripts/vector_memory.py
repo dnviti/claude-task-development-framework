@@ -381,6 +381,28 @@ def _dir_size_mb(path: Path) -> float:
 
 # ── Index Command ────────────────────────────────────────────────────────────
 
+def _check_enabled_or_exit(root: Path, json_output: bool = False):
+    """Check if vector memory is enabled; exit with informative message if not.
+
+    Args:
+        root: Project root path.
+        json_output: When True, print a JSON message instead of plain text.
+
+    Returns only if vector memory is enabled.
+    """
+    config = get_effective_config(root)
+    if config.get("enabled") is False:
+        msg = (
+            "Vector memory is disabled via vector_memory.enabled=false "
+            "in project-config.json. Set it to true to enable."
+        )
+        if json_output:
+            print(json.dumps({"status": "disabled_by_config", "message": msg}))
+        else:
+            print(f"Vector memory disabled: {msg}", file=sys.stderr)
+        sys.exit(0)
+
+
 def cmd_index(args):
     """Full or incremental index of the repository.
 
@@ -388,6 +410,7 @@ def cmd_index(args):
     the index is always built from scratch regardless of existing state.
     """
     root = Path(args.root).resolve()
+    _check_enabled_or_exit(root)
     config = get_effective_config(root)
     index_dir = root / config["index_path"]
     index_dir.mkdir(parents=True, exist_ok=True)
@@ -586,6 +609,7 @@ def _save_meta(index_dir: Path, config: dict, file_count: int):
 def cmd_search(args):
     """Semantic search over the vector index."""
     root = Path(args.root).resolve()
+    _check_enabled_or_exit(root, json_output=getattr(args, "json_output", False))
     config = get_effective_config(root)
     index_dir = root / config["index_path"]
 
@@ -704,6 +728,27 @@ def cmd_status(args):
     """Show index health, chunk counts, and staleness."""
     root = Path(args.root).resolve()
     config = get_effective_config(root)
+
+    # When disabled, report status without accessing the index
+    if config.get("enabled") is False:
+        status = {
+            "status": "disabled_by_config",
+            "enabled": False,
+            "message": (
+                "Vector memory is disabled via vector_memory.enabled=false "
+                "in project-config.json. Set it to true to enable."
+            ),
+        }
+        if getattr(args, "json_output", False):
+            print(json.dumps(status, indent=2))
+        else:
+            print("Vector Memory Status")
+            print("=" * 40)
+            print(f"  Status:  disabled_by_config")
+            print(f"  Enabled: False")
+            print(f"  {status['message']}")
+        return
+
     index_dir = root / config["index_path"]
 
     # Check dependencies
@@ -810,6 +855,7 @@ def cmd_status(args):
 def cmd_clear(args):
     """Reset the vector index."""
     root = Path(args.root).resolve()
+    _check_enabled_or_exit(root)
     config = get_effective_config(root)
     index_dir = root / config["index_path"]
 
@@ -856,6 +902,7 @@ def cmd_configure(args):
 def cmd_gc(args):
     """Garbage collection: prune old entries, compact tables, clean sessions."""
     root = Path(args.root).resolve()
+    _check_enabled_or_exit(root, json_output=getattr(args, "json_output", False))
     config = get_effective_config(root)
     consistency = get_effective_consistency_config(root)
     index_dir = root / config["index_path"]
