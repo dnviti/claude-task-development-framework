@@ -22,6 +22,7 @@ def register(server):
         file_filter: str = "",
         type_filter: str = "",
         root: str = ".",
+        backend: str = "",
     ) -> str:
         """Find relevant code and context via semantic similarity.
 
@@ -31,6 +32,8 @@ def register(server):
             file_filter: Optional substring filter on file paths.
             type_filter: Optional chunk type filter (function, class, etc.).
             root: Project root directory.
+            backend: Storage backend to query ("lancedb" or "sqlite").
+                     Defaults to the configured backend in project-config.json.
 
         Returns:
             JSON array of search results with file_path, name, chunk_type,
@@ -63,6 +66,8 @@ def register(server):
             cmd.extend(["--file-filter", file_filter])
         if type_filter:
             cmd.extend(["--type-filter", type_filter])
+        if backend and backend in ("lancedb", "sqlite"):
+            cmd.extend(["--backend", backend])
 
         try:
             result = subprocess.run(

@@ -35,7 +35,14 @@
     "index_path": ".claude/memory/vectors",
     "batch_size": 64,
     "include_patterns": [],
-    "exclude_patterns": []
+    "exclude_patterns": [],
+    "backend": "lancedb",
+    "sqlite": {
+      "enabled": false,
+      "hybrid_weight_vector": 0.7,
+      "hybrid_weight_text": 0.3,
+      "db_path": ".claude/memory/sqlite/memory.db"
+    }
   },
   "mcp_server": {
     "enabled": false,
