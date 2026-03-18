@@ -41,7 +41,7 @@
     "enabled": false,
     "transport": "stdio",
     "auto_start": false,
-    "_comment": "Vector memory MCP is opt-in. Enable via /setup. Requires: pip install mcp lancedb sentence-transformers"
+    "_comment": "Vector memory MCP is opt-in. Enable via /setup. Requires: pip install \"mcp>=1.0\" \"lancedb>=0.5.0,<1.0\" \"sentence-transformers>=2.7.0,<3.0\""
   },
   "social_announce": {
     "platforms": {

@@ -314,6 +314,9 @@ grep -qxF '.claude/memory/' .gitignore 2>/dev/null || echo '.claude/memory/' >> 
 
 # Append .claude/worktrees/ if not already present
 grep -qxF '.claude/worktrees/' .gitignore 2>/dev/null || echo '.claude/worktrees/' >> .gitignore
+
+# Append .mcp.json if not already present (contains machine-specific absolute paths)
+grep -qxF '.mcp.json' .gitignore 2>/dev/null || echo '.mcp.json' >> .gitignore
 ```
 
 **9.7b. GATE — ask the user:**

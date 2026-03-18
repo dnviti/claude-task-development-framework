@@ -170,7 +170,7 @@ Configure your MCP client to launch this script as a subprocess.
             print(json.dumps({
                 "mcp_sdk": False,
                 "status": "error",
-                "install": "pip install mcp",
+                "install": 'pip install "mcp>=1.0" "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"',
             }))
             sys.exit(1)
 
