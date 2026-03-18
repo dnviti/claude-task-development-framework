@@ -116,6 +116,70 @@ def is_in_worktree() -> bool:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
+
+# Frontend file extensions and directory patterns that indicate a frontend task
+_FRONTEND_EXTENSIONS = {
+    ".tsx", ".jsx", ".vue", ".svelte", ".astro",
+    ".css", ".scss", ".sass", ".less", ".styl",
+    ".html", ".ejs", ".hbs", ".pug",
+}
+_FRONTEND_DIRECTORIES = {
+    "components", "pages", "views", "layouts", "templates",
+    "styles", "css", "public", "static", "assets",
+    "app", "src/components", "src/pages", "src/views",
+    "src/layouts", "src/styles",
+}
+_FRONTEND_KEYWORDS = {
+    "frontend", "front-end", "ui", "component", "page", "layout",
+    "style", "css", "theme", "design", "widget", "dashboard",
+    "form", "modal", "dialog", "sidebar", "navbar", "header",
+    "footer", "responsive", "animation", "transition",
+}
+
+
+def is_frontend_task(task: dict) -> bool:
+    """Check if a task involves frontend work based on its metadata.
+
+    Inspects the task description, category, and 'Files involved' for
+    frontend indicators such as .tsx/.vue/.svelte extensions,
+    components/pages directories, and UI-related keywords.
+
+    Args:
+        task: A parsed task dict (from parse_blocks or platform issue body)
+              with keys like 'description', 'technical_details',
+              'files_create', 'files_modify', 'title'.
+
+    Returns:
+        True if the task appears to involve frontend code.
+    """
+    # Check file extensions in files_create and files_modify
+    for file_list_key in ("files_create", "files_modify"):
+        for filepath in task.get(file_list_key, []):
+            path_lower = filepath.lower()
+            # Check extension
+            for ext in _FRONTEND_EXTENSIONS:
+                if path_lower.endswith(ext):
+                    return True
+            # Check directory patterns
+            path_parts = path_lower.replace("\\", "/").split("/")
+            for part in path_parts:
+                if part in _FRONTEND_DIRECTORIES:
+                    return True
+
+    # Check description and technical details for frontend keywords
+    text_fields = [
+        task.get("title", ""),
+        task.get("description", ""),
+        task.get("technical_details", ""),
+    ]
+    combined_text = " ".join(text_fields).lower()
+    for keyword in _FRONTEND_KEYWORDS:
+        if keyword in combined_text:
+            return True
+
+    return False
+
+
 # ── File Reading Helpers ────────────────────────────────────────────────────
 
 def read_lines(filepath: Path) -> list[str]:
@@ -778,6 +842,31 @@ def cmd_verify_files(args):
     )
 
     print(json.dumps(report, indent=2))
+
+# ── Subcommand: is-frontend-task ───────────────────────────────────────────
+
+def cmd_is_frontend_task(args):
+    """Check if a task involves frontend work."""
+    main_root = get_main_repo_root()
+    code = args.code.upper()
+
+    block, fname = find_block_in_all(main_root, code, TASK_FILES)
+
+    if not block:
+        # For platform-only mode, accept JSON task data via --json-body
+        if args.json_body:
+            try:
+                task_data = json.loads(args.json_body)
+                result = is_frontend_task(task_data)
+                print(json.dumps({"code": code, "is_frontend": result}))
+                return
+            except json.JSONDecodeError:
+                pass
+        print(json.dumps({"error": f"Task {code} not found", "is_frontend": False}))
+        sys.exit(1)
+
+    result = is_frontend_task(block)
+    print(json.dumps({"code": code, "is_frontend": result, "source_file": fname}))
 
 # ── Subcommand: move ────────────────────────────────────────────────────────
 
@@ -2241,6 +2330,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("verify-files", help="Check file existence for a task")
     p.add_argument("code", help="Task code (e.g., AUTH-0001)")
     p.set_defaults(func=cmd_verify_files)
+
+    # is-frontend-task
+    p = sub.add_parser("is-frontend-task", help="Check if a task involves frontend work")
+    p.add_argument("code", help="Task code (e.g., AUTH-0001)")
+    p.add_argument("--json-body", default=None,
+                    help="JSON task data for platform-only mode (description, files, etc.)")
+    p.set_defaults(func=cmd_is_frontend_task)
 
     # add-test-procedure
     p = sub.add_parser("add-test-procedure", help="Append TEST PROCEDURE section to a progressing task block")
