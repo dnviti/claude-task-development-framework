@@ -32,7 +32,7 @@ Always respond and work in English. All idea and task content MUST be written in
 
 **Duplicate check (all flows):**
 - **Platform-only:** `PM search-issues` with key terms, checking both `idea` and `task` labels.
-- **Local/Dual:** `TM duplicates --keywords "keyword1,keyword2,keyword3"` (add `--files "to-do.txt,progressing.txt,done.txt"` when checking tasks). Warn user if matches found.
+- **Local/Dual:** `TM duplicates --keywords "keyword1,keyword2,keyword3"` (add `--files "to-do.txt,progressing.txt,done.txt"` when checking tasks). Add `--semantic` to also run vector-powered semantic matching alongside keyword search — this catches duplicates using different naming conventions. Warn user if matches found.
 
 **No ideas message:** "No ideas available. Use `/idea create` to add ideas first."
 
@@ -118,7 +118,7 @@ Present the idea to the user.
 
 **Step 3 — Derive Task Code:** Strip `IDEA-` prefix. `IDEA-AUTH-0001` becomes `AUTH-0001`.
 
-**Step 4 — Explore Codebase:** Read relevant files, check similar completed tasks, identify files to create/modify. Use `Glob` to verify paths.
+**Step 4 — Explore Codebase:** Read relevant files, check similar completed tasks, identify files to create/modify. Use `Glob` to verify paths. If vector memory is available, verify index freshness first (`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py freshness-check --root PROJECT_ROOT`). If `stale` is `true`, run an incremental re-index (`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py index --root PROJECT_ROOT`). Then use `semantic_search` (via MCP tool or `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py search "QUERY" --root PROJECT_ROOT --json`) to find related code, similar patterns, and existing implementations that keyword tools might miss — especially useful for finding implementations using different naming conventions.
 
 **Step 5 — Draft Task:**
 
@@ -243,9 +243,11 @@ Fetch current state per Skill Context (ideas AND tasks by all statuses). For pla
 
 **Step 3 — Evaluate Each Idea:**
 
+Before evaluating, if vector memory is available, verify index freshness (`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py freshness-check --root PROJECT_ROOT`). If `stale` is `true`, run an incremental re-index (`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py index --root PROJECT_ROOT`).
+
 | Check | Criteria | Label |
 |-------|----------|-------|
-| Already implemented? | `Grep` codebase for key terms, check done tasks | **REDUNDANT** |
+| Already implemented? | Use `semantic_search` (via MCP tool or `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py search "IDEA_DESCRIPTION" --root PROJECT_ROOT --json`) for meaning-based matching — this catches implementations using different naming conventions (e.g., "rate limiting" implemented as "throttle middleware"). Fall back to `Grep` if vector memory is unavailable. Also check done tasks. | **REDUNDANT** |
 | Already planned? | Search pending/in-progress tasks for overlap | **DUPLICATE** |
 | Technical landscape changed? | New services, architecture shifts, dependency changes | **NEEDS UPDATE** |
 | Still relevant? | Problem solved by different approach? | **OBSOLETE** |
@@ -282,7 +284,7 @@ Fetch current state per Skill Context (ideas AND tasks by all statuses). Read CL
 
 **Step 1 — Analyze current state** — understand planned, in-progress, completed tasks AND existing ideas to prevent duplicates.
 
-**Step 2 — Analyze codebase** — examine architecture, data models, components, services.
+**Step 2 — Analyze codebase** — examine architecture, data models, components, services. If vector memory is available, verify index freshness first (`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py freshness-check --root PROJECT_ROOT`). If `stale` is `true`, run an incremental re-index (`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py index --root PROJECT_ROOT`). Then use `semantic_search` (via MCP tool or `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py search "QUERY" --root PROJECT_ROOT --json`) to discover semantic gaps and architectural patterns that keyword-based tools miss.
 
 **Step 3 — Research new functionalities** via multi-source research (Twitter/X, Substack, Reddit, HN, SO, Dev.to, Medium, GitHub, domain forums; plus `@`-prefixed local files). **Source verification:** Check URLs are reachable, verify with corroborating source, discard unverifiable findings.
 

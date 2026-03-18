@@ -805,6 +805,68 @@ def cmd_status(args):
         print(f"  Pending conflicts: {status.get('pending_conflicts', 0)}")
 
 
+# ── Freshness Check Command ──────────────────────────────────────────────────
+
+def cmd_freshness_check(args):
+    """Return index freshness as JSON for pre-search validation.
+
+    Output: {"stale": bool, "age_seconds": int, "files_changed_since": int,
+             "files_added": int, "files_modified": int, "files_removed": int,
+             "index_exists": bool}
+    """
+    root = Path(args.root).resolve()
+    config = get_effective_config(root)
+    index_dir = root / config["index_path"]
+
+    result = {
+        "stale": True,
+        "age_seconds": -1,
+        "files_changed_since": 0,
+        "files_added": 0,
+        "files_modified": 0,
+        "files_removed": 0,
+        "index_exists": False,
+    }
+
+    meta_path = index_dir / INDEX_META
+    if not meta_path.exists():
+        # No index at all — always stale
+        print(json.dumps(result, indent=2))
+        return
+
+    result["index_exists"] = True
+
+    # Compute age in seconds
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        last_indexed = meta.get("last_indexed", "")
+        if last_indexed:
+            import calendar
+            struct = time.strptime(last_indexed, "%Y-%m-%dT%H:%M:%SZ")
+            indexed_epoch = calendar.timegm(struct)
+            result["age_seconds"] = int(time.time() - indexed_epoch)
+    except (json.JSONDecodeError, OSError, ValueError):
+        pass
+
+    # Compare manifests to check staleness
+    stored = load_stored_manifest(index_dir)
+    if stored:
+        gitignore_patterns = load_gitignore_patterns(root)
+        current = build_hash_manifest(root, gitignore_patterns, config)
+        added, modified, removed = diff_manifests(stored, current)
+        total_changed = len(added) + len(modified) + len(removed)
+        result["files_changed_since"] = total_changed
+        result["files_added"] = len(added)
+        result["files_modified"] = len(modified)
+        result["files_removed"] = len(removed)
+        result["stale"] = total_changed > 0
+    else:
+        # No stored manifest — treat as stale
+        result["stale"] = True
+
+    print(json.dumps(result, indent=2))
+
+
 # ── Clear Command ────────────────────────────────────────────────────────────
 
 def cmd_clear(args):
@@ -1373,6 +1435,11 @@ Examples:
     stat.add_argument("--json", dest="json_output", action="store_true",
                       help="Output as JSON")
 
+    # ── freshness-check ──
+    fc = sub.add_parser("freshness-check",
+                        help="Check index freshness for pre-search validation")
+    fc.add_argument("--root", default=".", help="Project root directory")
+
     # ── clear ──
     clr = sub.add_parser("clear", help="Reset the vector index")
     clr.add_argument("--root", default=".", help="Project root directory")
@@ -1432,6 +1499,8 @@ Examples:
         cmd_search(args)
     elif args.command == "status":
         cmd_status(args)
+    elif args.command == "freshness-check":
+        cmd_freshness_check(args)
     elif args.command == "clear":
         cmd_clear(args)
     elif args.command == "configure":
