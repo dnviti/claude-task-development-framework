@@ -54,6 +54,14 @@
       "compact_interval_seconds": 300,
       "max_segment_size_mb": 10,
       "auto_compact_on_search": true
+    },
+    "rlm": {
+      "enabled": false,
+      "provider": "ollama",
+      "max_depth": 3,
+      "max_context_mb": 10,
+      "aggregation": "map-reduce",
+      "timeout_seconds": 120
     }
   },
   "mcp_server": {
