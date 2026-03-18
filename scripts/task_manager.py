@@ -809,8 +809,47 @@ def cmd_duplicates(args):
                         "line": i,
                         "keyword": kw,
                         "text": line.strip(),
+                        "source": "keyword",
                     })
                     break  # one match per line
+
+    # Optional semantic search via vector_memory.py
+    semantic_results = []
+    if getattr(args, "semantic", False):
+        query = " ".join(keywords)
+        vm_script = Path(__file__).resolve().parent / "vector_memory.py"
+        if vm_script.exists():
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(vm_script), "search", query,
+                     "--root", str(root), "--json", "--top-k", "10"],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    raw = json.loads(result.stdout)
+                    for entry in raw:
+                        semantic_results.append({
+                            "file": entry.get("file_path", ""),
+                            "line": entry.get("start_line", 0),
+                            "keyword": query,
+                            "text": (entry.get("content", "")[:200]
+                                     if entry.get("content") else ""),
+                            "source": "semantic",
+                            "score": entry.get("score", 0.0),
+                            "chunk_type": entry.get("chunk_type", ""),
+                            "name": entry.get("name", ""),
+                        })
+            except (subprocess.TimeoutExpired, json.JSONDecodeError,
+                    OSError):
+                pass  # Graceful degradation — keyword results still returned
+
+    # Merge: keyword matches first, then semantic results (deduplicated)
+    seen_files_lines = {(m["file"], m["line"]) for m in matches}
+    for sr in semantic_results:
+        key = (sr["file"], sr["line"])
+        if key not in seen_files_lines:
+            matches.append(sr)
+            seen_files_lines.add(key)
 
     print(json.dumps(matches, indent=2))
 
@@ -2324,6 +2363,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("duplicates", help="Search for duplicate keywords")
     p.add_argument("--keywords", required=True, help="Comma-separated keywords")
     p.add_argument("--files", default=None, help="Comma-separated file list (default: all)")
+    p.add_argument("--semantic", action="store_true",
+                   help="Also run semantic search via vector_memory alongside keyword matching")
     p.set_defaults(func=cmd_duplicates)
 
     # verify-files
