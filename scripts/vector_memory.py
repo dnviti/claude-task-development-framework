@@ -125,6 +125,7 @@ def get_effective_config(root: Path) -> dict:
     to match the always-on default behavior introduced in VMEM-0024.
     """
     user_cfg = load_config(root)
+    lock_backend_cfg = user_cfg.get("lock_backend", {})
     return {
         "enabled": user_cfg.get("enabled", True),
         "auto_index": user_cfg.get("auto_index", True),
@@ -136,6 +137,22 @@ def get_effective_config(root: Path) -> dict:
         "batch_size": user_cfg.get("batch_size", DEFAULT_BATCH_SIZE),
         "include_patterns": user_cfg.get("include_patterns", []),
         "exclude_patterns": user_cfg.get("exclude_patterns", []),
+        "lock_backend": {
+            "type": lock_backend_cfg.get("type", "file"),
+            "sqlite_path": lock_backend_cfg.get(
+                "sqlite_path", ".claude/memory/locks/lock.db"
+            ),
+            "redis_url": lock_backend_cfg.get(
+                "redis_url", "redis://localhost:6379"
+            ),
+            "redis_key_prefix": lock_backend_cfg.get(
+                "redis_key_prefix", "ctdf:"
+            ),
+            "timeout": lock_backend_cfg.get("timeout", 30),
+            "auto_renew_interval": lock_backend_cfg.get(
+                "auto_renew_interval", 10
+            ),
+        },
     }
 
 
@@ -148,6 +165,42 @@ def get_effective_consistency_config(root: Path) -> dict:
         "conflict_strategy": user_cfg.get("conflict_strategy", "auto"),
         "enable_versioned_reads": user_cfg.get("enable_versioned_reads", False),
     }
+
+
+def _create_configured_lock(
+    index_dir,
+    config: dict,
+    agent_id: str = "",
+    session_id: str = "",
+    timeout_override: Optional[float] = None,
+):
+    """Create a MemoryLock using the configured lock backend.
+
+    Reads the ``lock_backend`` section from the effective config and
+    delegates to ``memory_lock.create_lock()`` for backend instantiation.
+
+    Returns None if memory_lock cannot be imported.
+    """
+    try:
+        from memory_lock import create_lock
+    except ImportError:
+        return None
+
+    lock_cfg = config.get("lock_backend", {})
+    backend_type = lock_cfg.get("type", "file")
+    timeout = timeout_override if timeout_override is not None else lock_cfg.get("timeout", 30)
+
+    return create_lock(
+        backend_name=backend_type,
+        store_path=index_dir,
+        agent_id=agent_id,
+        session_id=session_id,
+        timeout=timeout,
+        sqlite_path=lock_cfg.get("sqlite_path"),
+        redis_url=lock_cfg.get("redis_url", "redis://localhost:6379"),
+        redis_key_prefix=lock_cfg.get("redis_key_prefix", "ctdf:"),
+        auto_renew_interval=lock_cfg.get("auto_renew_interval", 10),
+    )
 
 
 # ── Initialization Guard ──────────────────────────────────────────────────────
@@ -406,15 +459,10 @@ def cmd_index(args):
     from chunkers import chunk_file, chunk_text_document
     from embeddings import create_provider, EmbeddingCache
 
-    # Acquire write lock if memory_lock is available
-    lock = None
-    try:
-        from memory_lock import MemoryLock
-        agent_id = os.environ.get("CTDF_AGENT_ID", f"agent-{os.getpid()}")
-        session_id = os.environ.get("CTDF_SESSION_ID", "")
-        lock = MemoryLock(index_dir, agent_id=agent_id, session_id=session_id)
-    except ImportError:
-        pass
+    # Acquire write lock using configured backend
+    agent_id = os.environ.get("CTDF_AGENT_ID", f"agent-{os.getpid()}")
+    session_id = os.environ.get("CTDF_SESSION_ID", "")
+    lock = _create_configured_lock(index_dir, config, agent_id=agent_id, session_id=session_id)
 
     print("Vector Memory — Indexing", file=sys.stderr)
     print(f"  Root: {root}", file=sys.stderr)
@@ -621,14 +669,9 @@ def cmd_search(args):
     if consistency_cfg.get("enable_versioned_reads") and hasattr(args, "version") and args.version:
         version = args.version
 
-    # Acquire read lock if available
-    lock = None
-    try:
-        from memory_lock import MemoryLock
-        agent_id = os.environ.get("CTDF_AGENT_ID", f"agent-{os.getpid()}")
-        lock = MemoryLock(index_dir, agent_id=agent_id)
-    except ImportError:
-        pass
+    # Acquire read lock using configured backend
+    agent_id = os.environ.get("CTDF_AGENT_ID", f"agent-{os.getpid()}")
+    lock = _create_configured_lock(index_dir, config, agent_id=agent_id)
 
     _ctx = lock.read() if lock else nullcontext()
     with _ctx:
@@ -1161,15 +1204,13 @@ def hook_file_changed(file_path: str):
         provider = create_provider(emb_config)
         cache = EmbeddingCache(index_dir / "embedding_cache")
 
-        # Acquire write lock
-        lock = None
-        try:
-            from memory_lock import MemoryLock
-            agent_id = os.environ.get("CTDF_AGENT_ID", f"agent-{os.getpid()}")
-            session_id = os.environ.get("CTDF_SESSION_ID", "")
-            lock = MemoryLock(index_dir, agent_id=agent_id, session_id=session_id, timeout=5.0)
-        except ImportError:
-            pass
+        # Acquire write lock using configured backend
+        agent_id = os.environ.get("CTDF_AGENT_ID", f"agent-{os.getpid()}")
+        session_id = os.environ.get("CTDF_SESSION_ID", "")
+        lock = _create_configured_lock(
+            index_dir, config, agent_id=agent_id, session_id=session_id,
+            timeout_override=5.0,
+        )
 
         _ctx = lock.write() if lock else nullcontext()
         with _ctx:
