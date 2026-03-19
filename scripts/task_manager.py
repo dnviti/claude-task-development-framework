@@ -1374,6 +1374,49 @@ def _load_project_config() -> dict:
             pass
     return {}
 
+def _get_cached_merge_strategy(target_branch: str) -> str:
+    """Read the cached merge strategy for a target branch from issues-tracker.json.
+
+    Returns one of 'squash', 'merge', 'rebase', or '' if not cached.
+    Falls back to checking the production branch config if the target
+    branch is not explicitly configured.
+    """
+    root = get_main_repo_root()
+    for name in ("issues-tracker.json", "github-issues.json"):
+        fp = root / ".claude" / name
+        if fp.exists():
+            try:
+                with open(fp, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                branches = data.get("branches", {})
+                # Direct match
+                if target_branch and target_branch in branches:
+                    info = branches[target_branch]
+                    if isinstance(info, dict):
+                        return info.get("merge_strategy", "")
+                # Fall back to the production branch's merge strategy
+                for bname, binfo in branches.items():
+                    if isinstance(binfo, dict) and binfo.get("role") == "production" and binfo.get("merge_strategy"):
+                        return binfo["merge_strategy"]
+            except (json.JSONDecodeError, OSError):
+                pass
+            break
+    return ""
+
+
+def _get_cached_merge_flag(target_branch: str) -> str:
+    """Return the gh CLI merge flag based on cached merge strategy.
+
+    Returns '--squash', '--rebase', or '--merge' (default).
+    """
+    strategy = _get_cached_merge_strategy(target_branch)
+    if strategy == "squash":
+        return "--squash"
+    elif strategy == "rebase":
+        return "--rebase"
+    return "--merge"
+
+
 def _shlex_quote(s: str) -> str:
     """Quote a string for shell use (cross-platform safe)."""
     if not s:
@@ -1460,7 +1503,9 @@ def cmd_platform_cmd(args):
             if params.get("jq"):
                 cmd += f" --jq '{params['jq']}'"
         elif op == "merge-pr":
-            cmd = f'gh pr merge {params.get("url", "")} --auto --merge'
+            merge_flag = _get_cached_merge_flag(params.get("base", ""))
+            pr_url = _shlex_quote(params.get("url", ""))
+            cmd = f'gh pr merge {pr_url} --auto {merge_flag}'
         elif op == "create-release":
             cmd = f'gh release create "{params.get("tag", "")}" --repo "{repo}"'
             cmd += f' --title "{params.get("title", "")}"'
@@ -1557,7 +1602,12 @@ def cmd_platform_cmd(args):
             if params.get("jq"):
                 cmd += f" | jq '{params['jq']}'"
         elif op == "merge-pr":
-            cmd = f'glab mr merge {params.get("number", "")} --auto-merge --when-pipeline-succeeds'
+            squash_flag = ""
+            strategy = _get_cached_merge_strategy(params.get("base", ""))
+            if strategy == "squash":
+                squash_flag = " --squash"
+            mr_number = _shlex_quote(params.get("number", ""))
+            cmd = f'glab mr merge {mr_number} --auto-merge --when-pipeline-succeeds{squash_flag}'
         elif op == "create-release":
             cmd = f'glab release create "{params.get("tag", "")}" --name "{params.get("title", "")}"'
             cmd += f' --notes "{params.get("notes", "")}"'
