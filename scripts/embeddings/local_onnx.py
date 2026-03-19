@@ -35,8 +35,6 @@ _MODEL_REGISTRY = {
 }
 
 _DEFAULT_CACHE_DIR = Path.home() / ".cache" / "claw" / "models"
-# Legacy cache path for backward compatibility with existing installations
-_LEGACY_CACHE_DIR = Path.home() / ".cache" / "claw" / "models"
 
 
 # ── GPU Provider Detection ────────────────────────────────────────────────────
@@ -117,10 +115,11 @@ def _inject_gpu_lib_paths(paths: list[str]) -> None:
         return
 
     current = os.environ.get(env_var, "")
+    current_set = set(current.split(separator)) if current else set()
     # Only inject paths that exist as directories and are not already present
     new_paths = [
         p for p in paths
-        if p not in current and Path(p).is_dir()
+        if p not in current_set and Path(p).is_dir()
     ]
 
     if new_paths:
@@ -268,13 +267,7 @@ class LocalOnnxProvider(EmbeddingProvider):
         if model_dir:
             self._model_dir = Path(model_dir)
         elif model_name_or_path in _MODEL_REGISTRY:
-            # Check legacy cache path first for backward compatibility,
-            # then use the new default path
-            legacy_dir = _LEGACY_CACHE_DIR / model_name_or_path
-            if legacy_dir.exists() and (legacy_dir / "model.onnx").exists():
-                self._model_dir = legacy_dir
-            else:
-                self._model_dir = _DEFAULT_CACHE_DIR / model_name_or_path
+            self._model_dir = _DEFAULT_CACHE_DIR / model_name_or_path
         else:
             self._model_dir = Path(model_name_or_path)
 
@@ -327,8 +320,9 @@ class LocalOnnxProvider(EmbeddingProvider):
         )
 
         # ── Auto-inject GPU library paths before session creation ────
+        _paths_injected = False
         if self._gpu_mode in ("auto", "gpu"):
-            self._inject_gpu_paths_if_needed()
+            _paths_injected = self._inject_gpu_paths_if_needed()
 
         # Select execution providers based on gpu_mode
         providers = _detect_execution_providers(self._gpu_mode)
@@ -351,7 +345,12 @@ class LocalOnnxProvider(EmbeddingProvider):
 
         if _fell_back_to_cpu and self._gpu_mode in ("auto", "gpu"):
             # Attempt env var creation + retry before giving up on GPU
-            retried = self._retry_gpu_session(ort, model_path, sess_options)
+            # Skip if paths were already injected pre-session (no new
+            # paths to discover)
+            retried = self._retry_gpu_session(
+                ort, model_path, sess_options,
+                skip_inject=_paths_injected,
+            )
             if not retried and self._gpu_mode == "gpu":
                 raise RuntimeError(
                     _build_platform_gpu_error_message(
@@ -454,7 +453,8 @@ class LocalOnnxProvider(EmbeddingProvider):
 
         return False
 
-    def _retry_gpu_session(self, ort, model_path, sess_options) -> bool:
+    def _retry_gpu_session(self, ort, model_path, sess_options,
+                           skip_inject: bool = False) -> bool:
         """Attempt to recover GPU after silent fallback to CPU.
 
         Discovers missing GPU library paths, injects them into the
@@ -462,13 +462,19 @@ class LocalOnnxProvider(EmbeddingProvider):
         retry succeeds with a GPU provider, updates self._session and
         self._active_provider.
 
+        Args:
+            skip_inject: If True, skip path discovery/injection (already
+                done pre-session). Only re-create the session to check
+                if env changes took effect.
+
         Returns:
             True if GPU was recovered, False if still on CPU.
         """
-        # Try to discover and inject missing env vars
-        injected = self._inject_gpu_paths_if_needed()
-        if not injected:
-            return False
+        if not skip_inject:
+            # Try to discover and inject missing env vars
+            injected = self._inject_gpu_paths_if_needed()
+            if not injected:
+                return False
 
         # Re-detect providers (env may have changed)
         providers = _detect_execution_providers(self._gpu_mode)

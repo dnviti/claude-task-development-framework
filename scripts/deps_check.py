@@ -261,9 +261,10 @@ def discover_gpu_lib_paths(create_if_missing: bool = False) -> dict:
             env_var = result["env_var"]
             separator = ":" if plat == "linux" else ";"
             current = os.environ.get(env_var, "")
+            current_set = set(current.split(separator)) if current else set()
             new_paths = [
                 p for p in discovered
-                if p not in current and Path(p).is_dir()
+                if p not in current_set and Path(p).is_dir()
             ]
             if new_paths:
                 prefix = separator.join(new_paths)
@@ -503,11 +504,19 @@ def _persist_gpu_lib_paths(paths: list[str]) -> bool:
     Writes to vector_memory.gpu_acceleration.lib_paths so subsequent
     runs use the stored paths instead of re-discovering.
 
+    Only persists paths that are existing directories to prevent
+    injection of arbitrary paths into the config file.
+
     Returns:
         True if persisted successfully, False otherwise.
     """
     config_path = Path(".claude/project-config.json")
     if not config_path.exists():
+        return False
+
+    # Validate: only persist paths that are existing directories
+    valid_paths = [p for p in paths if Path(p).is_dir()]
+    if not valid_paths:
         return False
 
     try:
@@ -516,7 +525,7 @@ def _persist_gpu_lib_paths(paths: list[str]) -> bool:
 
         vm = config.setdefault("vector_memory", {})
         gpu_cfg = vm.setdefault("gpu_acceleration", {})
-        gpu_cfg["lib_paths"] = paths
+        gpu_cfg["lib_paths"] = valid_paths
 
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
@@ -605,11 +614,12 @@ def _inject_lib_paths(lib_info: dict) -> None:
     env_var = lib_info["env_var"]
     current = os.environ.get(env_var, "")
     separator = ":" if lib_info["platform"] == "linux" else ";"
+    current_set = set(current.split(separator)) if current else set()
 
     # Only inject paths that exist as directories and are not already present
     new_paths = [
         p for p in lib_info["paths"]
-        if p not in current and Path(p).is_dir()
+        if p not in current_set and Path(p).is_dir()
     ]
 
     if new_paths:

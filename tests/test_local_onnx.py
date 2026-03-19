@@ -111,14 +111,20 @@ class TestPersistGpuLibPaths:
         config_file = config_dir / "project-config.json"
         config_file.write_text(json.dumps({"vector_memory": {}}))
 
+        # Create real directories so path validation passes
+        cuda_dir = tmp_path / "cuda_lib"
+        cudnn_dir = tmp_path / "cudnn_lib"
+        cuda_dir.mkdir()
+        cudnn_dir.mkdir()
+
         monkeypatch.chdir(tmp_path)
 
-        result = _persist_gpu_lib_paths(["/opt/cuda/lib", "/opt/cudnn/lib"])
+        result = _persist_gpu_lib_paths([str(cuda_dir), str(cudnn_dir)])
 
         assert result is True
         saved = json.loads(config_file.read_text())
         assert saved["vector_memory"]["gpu_acceleration"]["lib_paths"] == [
-            "/opt/cuda/lib", "/opt/cudnn/lib"
+            str(cuda_dir), str(cudnn_dir)
         ]
 
     def test_persist_no_config_returns_false(self, tmp_path, monkeypatch):
@@ -261,3 +267,30 @@ class TestRetryGpuSession:
             )
 
         assert result is False
+
+    def test_skip_inject_skips_discovery(self):
+        """When skip_inject=True, path discovery is skipped."""
+        provider = self._make_provider("auto")
+
+        mock_session = MagicMock()
+        mock_session.get_providers.return_value = ["CUDAExecutionProvider"]
+
+        mock_ort = MagicMock()
+        mock_ort.InferenceSession.return_value = mock_session
+
+        with patch.object(
+            provider, "_inject_gpu_paths_if_needed"
+        ) as mock_inject:
+            with patch(
+                "embeddings.local_onnx._detect_execution_providers",
+                return_value=["CUDAExecutionProvider", "CPUExecutionProvider"],
+            ):
+                result = provider._retry_gpu_session(
+                    mock_ort, "/fake/model.onnx", MagicMock(),
+                    skip_inject=True,
+                )
+
+        # _inject_gpu_paths_if_needed should NOT have been called
+        mock_inject.assert_not_called()
+        assert result is True
+        assert provider._active_provider == "CUDAExecutionProvider"
