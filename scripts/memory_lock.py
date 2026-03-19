@@ -256,6 +256,7 @@ class FileLockBackend(LockBackend):
         session_id: str = "",
         lock_dir: Optional[str | Path] = None,
         lock_name: str = "vector_store",
+        timeout: float = 30.0,
     ):
         self.store_path = Path(store_path).resolve()
         self.agent_id = agent_id or f"agent-{os.getpid()}"
