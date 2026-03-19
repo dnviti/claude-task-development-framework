@@ -53,7 +53,18 @@ def load_config(root: Path) -> tuple[dict, str]:
 
 
 def save_config(data: dict, config_path: str) -> None:
-    """Write issues tracker config back to disk."""
+    """Write issues tracker config back to disk.
+
+    Validates that config_path is within the project directory to prevent
+    path traversal.
+    """
+    resolved = Path(config_path).resolve()
+    project_root = find_project_root().resolve()
+    if not resolved.is_relative_to(project_root):
+        raise ValueError(
+            f"config_path must be within the project root ({project_root}). "
+            f"Got: {config_path}"
+        )
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
         f.write("\n")
@@ -87,6 +98,7 @@ def cache_branch_protection(data: dict, config_path: str,
     entry["allow_deletions"] = allow_deletions
 
     branches[branch] = entry
+    # Mixed keys: separating requires schema migration; current structure is backward-compatible
     branches.setdefault("cache_ttl_hours", 24)
     branches["last_refreshed"] = datetime.now(timezone.utc).isoformat()
     data["branches"] = branches
@@ -124,13 +136,6 @@ def setup_github_protection(repo: str, branch: str, required_reviews: int,
         }
 
     payload = json.dumps(protection)
-
-    result = run_cmd([
-        "gh", "api",
-        f"repos/{repo}/branches/{branch}/protection",
-        "-X", "PUT",
-        "--input", "-",
-    ])
 
     # Use stdin for the payload since --input - reads from stdin
     result = subprocess.run(
@@ -186,6 +191,7 @@ def setup_gitlab_protection(repo: str, branch: str, required_reviews: int,
     # and branch protection rules
 
     # First, unprotect to reset (idempotent re-apply)
+    # URL encoding: branch names from trusted config, not user input
     run_cmd(["glab", "api", f"projects/{repo.replace('/', '%2F')}/protected_branches/{branch}",
              "-X", "DELETE"])
 

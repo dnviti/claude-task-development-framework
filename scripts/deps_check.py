@@ -137,6 +137,8 @@ def install_instructions(missing: list[str] | None = None) -> str:
 def detect_gpu_providers() -> list[str]:
     """Detect available ONNX Runtime GPU execution providers.
 
+    Separate GPU detection: deps_check.py is stdlib-only by design; cannot import local_onnx
+
     Returns a list of available GPU provider names (excluding CPU).
     Returns empty list if onnxruntime is not installed.
     """

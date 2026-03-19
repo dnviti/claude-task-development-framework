@@ -147,6 +147,7 @@ class ReplicateProvider(ImageProvider):
 
         headers = {"Authorization": f"Bearer {self._api_key}"}
 
+        # Blocking poll: acceptable for CLI tool; async refactor deferred to future iteration
         for _ in range(_MAX_POLLS):
             time.sleep(_POLL_INTERVAL)
 

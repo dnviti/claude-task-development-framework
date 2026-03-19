@@ -252,6 +252,7 @@ def _query_claude(prompt: str, model: str = "") -> Optional[str]:
         "messages": [{"role": "user", "content": prompt}],
     }
 
+    # SSL: stdlib TLS verification is sufficient; cert pinning would break corporate proxy environments
     try:
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -318,7 +319,10 @@ class ConflictJudge:
         return value
 
     def _build_prompt(self, conflict: dict) -> str:
-        """Build the user prompt for the judge from a conflict record dict."""
+        """Build the user prompt for the judge from a conflict record dict.
+
+        Prompt injection: conflict values from trusted agent memory, not external input
+        """
         return JUDGE_USER_PROMPT_TEMPLATE.format(
             field=self._sanitize_prompt_value(
                 conflict.get("field", "unknown"), max_length=200

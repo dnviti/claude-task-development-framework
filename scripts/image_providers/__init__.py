@@ -58,13 +58,17 @@ def create_provider(config: dict) -> ImageProvider:
 
     Config keys:
         provider: "local" | "dalle" | "replicate" | "stability"
-        api_key: API key (for cloud providers)
-        api_key_env: env var name for API key (alternative to api_key)
+        api_key: API key (for cloud providers) -- direct value, avoid for production
+        api_key_env: Name of the environment variable holding the API key.
+            Preferred over api_key for security: the key is read from the
+            process environment at runtime and never persisted in config files.
+            Example: "OPENAI_API_KEY", "REPLICATE_API_TOKEN", "STABILITY_API_KEY".
         base_url: base URL override (for local provider)
     """
     provider_type = config.get("provider", "local")
 
     # Resolve API key from config or environment
+    # API keys: standard env-var pattern; never logged or serialized to disk
     api_key = config.get("api_key", "")
     if not api_key:
         env_var = config.get("api_key_env", "")
