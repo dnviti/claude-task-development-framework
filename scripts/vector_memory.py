@@ -110,6 +110,7 @@ def apply_search_filters(search_query, top_k: int,
 DEFAULT_INDEX_DIR = ".claude/memory/vectors"
 DEFAULT_CHUNK_SIZE = 2000
 DEFAULT_BATCH_SIZE = 64
+DEFAULT_SEARCH_LOG_MAX_SIZE_MB = 10
 HASH_MANIFEST = "file_hashes.json"
 INDEX_META = "index_meta.json"
 TABLE_NAME = "chunks"
@@ -217,7 +218,8 @@ def get_effective_config(root: Path) -> dict:
     user_cfg = load_config(root)
     search_log_defaults = {"enabled": False,
                            "path": ".claude/memory/search_log.jsonl",
-                           "include_content": False}
+                           "include_content": False,
+                           "max_size_mb": DEFAULT_SEARCH_LOG_MAX_SIZE_MB}
     user_search_log = user_cfg.get("search_log", {})
     return {
         "enabled": user_cfg.get("enabled", True),
@@ -685,15 +687,34 @@ def _log_search(root: Path, config: dict, query: str, top_k: int,
                 file_filter: str, type_filter: str, df) -> None:
     """Append a JSONL entry for a search query if search_log is enabled.
 
-    Non-blocking: failures are silently ignored to never affect search.
+    Non-blocking: failures are logged to stderr but never affect search.
+    Security: the log path is validated to stay within the project root.
     """
     log_cfg = config.get("search_log", {})
     if not log_cfg.get("enabled"):
         return
     try:
-        log_path = root / log_cfg.get("path",
-                                       ".claude/memory/search_log.jsonl")
+        raw_path = log_cfg.get("path", ".claude/memory/search_log.jsonl")
+        log_path = (root / raw_path).resolve()
+
+        # S-1: Guard against path traversal — log must stay under root
+        try:
+            log_path.relative_to(root.resolve())
+        except ValueError:
+            print(f"Warning: search_log.path {raw_path!r} resolves outside "
+                  f"project root; logging skipped.", file=sys.stderr)
+            return
+
         log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # O-1: Rotate log if it exceeds configured max size
+        max_bytes = log_cfg.get("max_size_mb",
+                                DEFAULT_SEARCH_LOG_MAX_SIZE_MB) * 1024 * 1024
+        if log_path.exists() and log_path.stat().st_size >= max_bytes:
+            rotated = log_path.with_suffix(".jsonl.1")
+            if rotated.exists():
+                rotated.unlink()
+            log_path.rename(rotated)
 
         include_content = log_cfg.get("include_content", False)
         results = []
@@ -717,10 +738,19 @@ def _log_search(root: Path, config: dict, query: str, top_k: int,
             "result_count": len(results),
             "results": results,
         }
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, separators=(",", ":")) + "\n")
-    except Exception:
-        pass  # Never block search on log failure
+
+        # S-3: Open with restrictive permissions (owner read/write only)
+        fd = os.open(str(log_path),
+                     os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            with os.fdopen(fd, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, separators=(",", ":")) + "\n")
+        except Exception:
+            # fd is already closed by os.fdopen on failure
+            raise
+    except Exception as exc:
+        # O-3: Warn on stderr instead of silently swallowing
+        print(f"Warning: search log write failed: {exc}", file=sys.stderr)
 
 
 # ── Search Command ───────────────────────────────────────────────────────────
