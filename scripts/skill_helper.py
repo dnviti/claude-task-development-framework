@@ -866,7 +866,9 @@ def dispatch_help(parts: list[str]) -> dict:
 
 
 def dispatch_crazy(parts: list[str]) -> dict:
-    """Dispatch for the crazy skill. Always returns flow 'build' and yolo True."""
+    """Dispatch for the crazy skill. Always returns flow 'build'; yolo defaults True."""
+    parts, _yolo = _extract_yolo(parts)
+    # Crazy skill forces yolo=True regardless of flag presence
     return {"flow": "build", "task_code": "", "remaining_args": " ".join(parts), "yolo": True}
 
 
