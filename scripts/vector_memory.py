@@ -410,6 +410,10 @@ def cmd_index(args):
     from chunkers import chunk_file, chunk_text_document
     from embeddings import create_provider, EmbeddingCache
 
+    # Resolve agent/session IDs once (used by both event sourcing and lock paths)
+    agent_id = os.environ.get("CTDF_AGENT_ID", f"agent-{os.getpid()}")
+    session_id = os.environ.get("CTDF_SESSION_ID", "")
+
     # Check if event sourcing is enabled
     use_event_sourcing = False
     event_log = None
@@ -427,14 +431,9 @@ def cmd_index(args):
     if not use_event_sourcing:
         try:
             from memory_lock import MemoryLock
-            agent_id = os.environ.get("CTDF_AGENT_ID", f"agent-{os.getpid()}")
-            session_id = os.environ.get("CTDF_SESSION_ID", "")
             lock = MemoryLock(index_dir, agent_id=agent_id, session_id=session_id)
         except ImportError:
             pass
-
-    agent_id = os.environ.get("CTDF_AGENT_ID", f"agent-{os.getpid()}")
-    session_id = os.environ.get("CTDF_SESSION_ID", "")
 
     print("Vector Memory — Indexing", file=sys.stderr)
     print(f"  Root: {root}", file=sys.stderr)
@@ -792,7 +791,8 @@ def cmd_search(args):
     provider = create_provider(emb_config)
     query_embedding = provider.embed([query])[0]
 
-    # Auto-compact pending events before search if event sourcing is enabled
+    # Auto-compact pending events before search if event sourcing is enabled.
+    # Respects compact_interval_seconds to avoid compacting on every search.
     try:
         from memory_event_log import (
             is_event_sourcing_enabled, create_event_log,
@@ -804,26 +804,50 @@ def cmd_search(args):
                 event_log = create_event_log(root)
                 status = event_log.status()
                 if status["total_events"] > 0:
-                    # Compact under exclusive lock
-                    compact_lock = None
+                    # Throttle: only compact if enough time has passed
+                    compact_interval = es_config.get(
+                        "compact_interval_seconds", 300
+                    )
+                    last_compact_file = index_dir / ".last_compact_ts"
+                    should_compact = True
                     try:
-                        from memory_lock import EventLock
-                        agent_id = os.environ.get("CTDF_AGENT_ID",
-                                                  f"agent-{os.getpid()}")
-                        compact_lock = EventLock(index_dir, agent_id=agent_id)
-                    except ImportError:
-                        pass
+                        if last_compact_file.exists():
+                            last_ts = float(
+                                last_compact_file.read_text(encoding="utf-8").strip()
+                            )
+                            if time.time() - last_ts < compact_interval:
+                                should_compact = False
+                    except (OSError, ValueError):
+                        pass  # If we can't read, compact anyway
 
-                    cache = EmbeddingCache(index_dir / "embedding_cache")
-                    _compact_ctx = (compact_lock.compact()
-                                    if compact_lock else nullcontext())
-                    with _compact_ctx:
-                        db = _open_db(index_dir)
-                        table = _get_or_create_table(db, provider.dimension())
-                        backend = LanceDBEventBackend(
-                            db, table, provider, cache
-                        )
-                        event_log.compact(target_backend=backend)
+                    if should_compact:
+                        compact_lock = None
+                        try:
+                            from memory_lock import EventLock
+                            agent_id = os.environ.get("CTDF_AGENT_ID",
+                                                      f"agent-{os.getpid()}")
+                            compact_lock = EventLock(index_dir, agent_id=agent_id)
+                        except ImportError:
+                            pass
+
+                        cache = EmbeddingCache(index_dir / "embedding_cache")
+                        _compact_ctx = (compact_lock.compact()
+                                        if compact_lock else nullcontext())
+                        with _compact_ctx:
+                            db = _open_db(index_dir)
+                            table = _get_or_create_table(db, provider.dimension())
+                            backend = LanceDBEventBackend(
+                                db, table, provider, cache
+                            )
+                            event_log.compact(target_backend=backend)
+
+                        # Record last compact time
+                        try:
+                            last_compact_file.write_text(
+                                str(time.time()), encoding="utf-8"
+                            )
+                        except OSError:
+                            pass
     except ImportError:
         pass
 
