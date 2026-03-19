@@ -549,7 +549,32 @@ class MemoryOrchestrator:
         self._available = self.registry.discover()
 
     def _find_root(self) -> Path:
-        """Auto-detect project root."""
+        """Auto-detect project root, resolving through git worktrees.
+
+        Uses ``git rev-parse --git-common-dir`` to detect worktrees so that
+        the orchestrator always operates on the main repo's shared memory.
+        Falls back to the legacy directory-walk approach when git is
+        unavailable.
+        """
+        import subprocess as _sp
+        try:
+            result = _sp.run(
+                ["git", "rev-parse", "--git-common-dir", "--git-dir"],
+                capture_output=True, text=True, check=True,
+            )
+            lines = result.stdout.strip().splitlines()
+            if len(lines) >= 2:
+                common_path = Path(lines[0]).resolve()
+                git_dir_path = Path(lines[1]).resolve()
+                if common_path != git_dir_path:
+                    # Inside a worktree — common dir is <main-repo>/.git
+                    return common_path.parent
+                # Not a worktree — git dir is <repo>/.git
+                return git_dir_path.parent
+        except (FileNotFoundError, _sp.CalledProcessError):
+            pass
+
+        # Fallback: walk up directories looking for .claude/ or .git/
         d = Path.cwd()
         while d != d.parent:
             if (d / ".claude").is_dir() or (d / ".git").exists():
@@ -905,7 +930,13 @@ Examples:
         parser.print_help()
         sys.exit(1)
 
-    root = Path(args.root).resolve()
+    # Resolve root through git worktrees so that agents running in
+    # .claude/worktrees/ use the main repo's shared memory directory.
+    try:
+        from mcp_tools import resolve_main_repo_root
+        root = resolve_main_repo_root(args.root)
+    except ImportError:
+        root = Path(args.root).resolve()
 
     if args.command == "search":
         orch = MemoryOrchestrator(root=root)

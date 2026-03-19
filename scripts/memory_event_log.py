@@ -39,6 +39,36 @@ DEFAULT_MAX_SEGMENT_SIZE_MB = 10
 DEFAULT_COMPACT_INTERVAL = 300  # seconds
 
 
+def _resolve_worktree_root(root: Path) -> Path:
+    """Resolve root through git worktrees to the main repository.
+
+    Ensures that event logs are always written to the main repo's
+    ``.claude/memory/events/`` directory, even when called from an agent
+    running inside ``.claude/worktrees/``.
+
+    Falls back to ``Path(root).resolve()`` when git is unavailable.
+    """
+    import subprocess as _sp
+    resolved = Path(root).resolve()
+    try:
+        result = _sp.run(
+            ["git", "rev-parse", "--git-common-dir", "--git-dir"],
+            capture_output=True, text=True, check=True,
+            cwd=str(resolved),
+        )
+        lines = result.stdout.strip().splitlines()
+        if len(lines) >= 2:
+            common_path = Path(lines[0]).resolve()
+            git_dir_path = Path(lines[1]).resolve()
+            if common_path != git_dir_path:
+                # Inside a worktree — common dir is <main-repo>/.git
+                return common_path.parent
+            return git_dir_path.parent
+    except (FileNotFoundError, _sp.CalledProcessError):
+        pass
+    return resolved
+
+
 # ── Event Data Classes ───────────────────────────────────────────────────────
 
 class MemoryEvent:
@@ -126,7 +156,7 @@ class EventLog:
         events_dir: Optional[str] = None,
         max_segment_size_mb: float = DEFAULT_MAX_SEGMENT_SIZE_MB,
     ):
-        self.root = Path(root).resolve()
+        self.root = _resolve_worktree_root(root)
         self.events_dir = self.root / (events_dir or DEFAULT_EVENTS_DIR)
         self.events_dir.mkdir(parents=True, exist_ok=True)
         self.max_segment_size_bytes = int(max_segment_size_mb * 1024 * 1024)

@@ -41,6 +41,36 @@ DEFAULT_SESSIONS_DIR = ".claude/memory/sessions"
 DEFAULT_CONFLICTS_DIR = ".claude/memory/conflicts"
 
 AGENT_TYPES = ("task", "scout", "release", "docs", "pr-analysis", "monitor")
+
+
+def _resolve_worktree_root(root: Path) -> Path:
+    """Resolve root through git worktrees to the main repository.
+
+    Ensures that sessions and conflicts are always written to the main
+    repo's ``.claude/memory/`` directory, even when called from an agent
+    running inside ``.claude/worktrees/``.
+
+    Falls back to ``Path(root).resolve()`` when git is unavailable.
+    """
+    import subprocess as _sp
+    resolved = Path(root).resolve()
+    try:
+        result = _sp.run(
+            ["git", "rev-parse", "--git-common-dir", "--git-dir"],
+            capture_output=True, text=True, check=True,
+            cwd=str(resolved),
+        )
+        lines = result.stdout.strip().splitlines()
+        if len(lines) >= 2:
+            common_path = Path(lines[0]).resolve()
+            git_dir_path = Path(lines[1]).resolve()
+            if common_path != git_dir_path:
+                # Inside a worktree — common dir is <main-repo>/.git
+                return common_path.parent
+            return git_dir_path.parent
+    except (FileNotFoundError, _sp.CalledProcessError):
+        pass
+    return resolved
 ENTRY_CATEGORIES = ("factual", "additive", "opinion")
 
 CONFLICT_STRATEGIES = {
@@ -138,6 +168,7 @@ class SessionRegistry:
     """
 
     def __init__(self, root: Path):
+        root = _resolve_worktree_root(root)
         self.sessions_dir = root / DEFAULT_SESSIONS_DIR
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
 
@@ -339,8 +370,8 @@ class ConflictResolver:
     """
 
     def __init__(self, root: Path):
-        self.root = root
-        self.conflicts_dir = root / DEFAULT_CONFLICTS_DIR
+        self.root = _resolve_worktree_root(root)
+        self.conflicts_dir = self.root / DEFAULT_CONFLICTS_DIR
         self.conflicts_dir.mkdir(parents=True, exist_ok=True)
 
     def detect_conflict(
@@ -607,9 +638,9 @@ class MemoryProtocol:
     """
 
     def __init__(self, root: Path, lock_backend: Optional[dict] = None):
-        self.root = root
-        self.registry = SessionRegistry(root)
-        self.resolver = ConflictResolver(root)
+        self.root = _resolve_worktree_root(root)
+        self.registry = SessionRegistry(self.root)
+        self.resolver = ConflictResolver(self.root)
         self.lock_backend_config = lock_backend or {}
 
     def register_agent(
