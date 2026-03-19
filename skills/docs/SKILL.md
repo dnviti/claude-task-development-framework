@@ -149,6 +149,14 @@ GATE: "Proceed with documentation generation" / "Adjust scope" / "Cancel"
 - `development.md` ← test files, lint configs, CLAUDE.md, CONTRIBUTING.md
 - `troubleshooting.md` ← error handling code, logging, health check files
 
+After role classification, perform semantic discovery for each section to find cross-cutting source files (logging, error handling, middleware, utilities) that don't fit a single role but are essential to the documentation:
+
+```bash
+DM semantic-discover --section <section_name> --top-k 10
+```
+
+Parse `discovered_files` from the result and read those files alongside the role-classified ones. These are files semantically related to the section's topic that the static role classification missed.
+
 **5b. Write the section** following [Documentation Standards](#documentation-standards) and the `visual_richness_level` selected in Step 2.5.
 
 **Tier-specific formatting rules:**
@@ -156,18 +164,26 @@ GATE: "Proceed with documentation generation" / "Adjust scope" / "Cancel"
 | Tier | Formatting |
 |------|------------|
 | **zero** | Standard Markdown only. No emoji, no images, no inline HTML. Plain headings, lists, code blocks, and Mermaid diagrams only. |
-| **tiny** | Prepend each H2 section header with a relevant Unicode emoticon (e.g., `## ⚙️ Configuration`, `## 🚀 Deployment`). In `index.md`, include `![Project Logo](assets/logo.svg)`. If no logo file exists at `docs/assets/logo.svg`, create a simple project SVG logo using inline SVG markup (geometric shape + project initials, saved via the Write tool). |
+| **tiny** | Prepend each H2 section header with a relevant Unicode emoticon (e.g., `## Configuration`, `## Deployment`). In `index.md`, include `![Project Logo](assets/logo.svg)`. If no logo file exists at `docs/assets/logo.svg`, create a simple project SVG logo using inline SVG markup (geometric shape + project initials, saved via the Write tool). |
 | **moderate** | All of **tiny**, plus: use HTML `<div class="callout callout-info">` / `callout-warning` / `callout-tip` blocks for important notes, tips, and warnings. Use `<img>` badge shields (e.g., `<img src="https://img.shields.io/badge/...">`) for version, status, and license indicators in `index.md`. Use `<table>` with styled headers where Markdown tables are insufficient for complex data. Use inline SVG icons for visual markers. |
 | **large** | All of **moderate**, plus: wrap feature overviews in card-style `<div class="card">` layouts. Use `<details><summary>` collapsible sections for lengthy reference content (e.g., full API listings, exhaustive config tables). Use styled headers via `<h2 style="border-bottom: 2px solid #4A90D9; padding-bottom: 0.3em;">`. Use `<picture>` elements with light/dark mode variants where applicable. Add a CSS `<style>` block at the top of each file defining `.card`, `.callout`, `.badge` classes. |
 
 All tiers include:
-- YAML front-matter with title, description, generation timestamp, source files list
+- YAML front-matter with title, description, generation timestamp, source files list (including semantically discovered files)
 - Structured content with H2/H3 headings
 - Mermaid diagrams where the section involves workflows or architecture
 - Concrete code examples, exact file paths, real command names
 - Write each file to `docs/<section>.md` using the Write tool
 
-**5c. Track source files** — record which source files contributed to each section for the manifest.
+**5b-bis. Re-index documentation** — after writing all sections, trigger incremental re-indexing so the vector index includes the latest documentation content:
+
+```bash
+DM reindex-docs
+```
+
+This ensures that subsequent `/docs sync` runs and release pipeline GC (Stage 9d-bis) operate on an up-to-date index.
+
+**5c. Track source files** — record which source files contributed to each section for the manifest. Include both role-classified and semantically discovered sources.
 
 **6.** Generate `index.md`:
 - Project title and description (from README/CLAUDE.md)
@@ -222,7 +238,15 @@ DM diff-since-tag --tag <latest_tag>
 
 Use `affected_sections` to supplement staleness data.
 
-**3.** If all sections are `current` → "Documentation is up to date. No changes needed." **STOP.**
+**2c.** Supplement hash-based staleness with semantic similarity. Collect all changed source files from step 2 (and 2b if applicable), then run:
+
+```bash
+DM semantic-staleness --changed-files '["path/to/changed.py", ...]'
+```
+
+This detects when a change to a utility module affects a documentation section even if the utility is not in that section's tracked source list. Merge the `affected_sections` result with the staleness data from step 2.
+
+**3.** If all sections are `current` (including after semantic staleness check) → "Documentation is up to date. No changes needed." **STOP.**
 
 **4.** Present stale sections:
 
@@ -246,6 +270,11 @@ GATE: "Update stale sections" / "Update all" / "Cancel"
 **6.** Update manifest:
 ```bash
 DM init-manifest --sections-json '[...]'
+```
+
+**6b.** Re-index updated documentation into vector memory:
+```bash
+DM reindex-docs
 ```
 
 **7.** Present report:
