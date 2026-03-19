@@ -22,15 +22,19 @@ Redis backend requires the optional ``redis`` package.
 """
 
 import os
+import re
 import sys
 import time
 import json
+import uuid
 import sqlite3
 import threading
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Optional
+from urllib.parse import urlparse
 
 # ── Platform-specific imports ────────────────────────────────────────────────
 
@@ -290,7 +294,6 @@ class FileLockBackend(LockBackend):
                         f"pid={holder.get('pid', '?')}, "
                         f"since={holder.get('acquired_iso', '?')})"
                     )
-                import warnings
                 warnings.warn(
                     f"Potential deadlock on {self._lock_file}{holder_desc}. "
                     f"Waiting {elapsed:.0f}s for lock.",
@@ -400,6 +403,10 @@ class SQLiteLockBackend(LockBackend):
 
     def acquire(self, exclusive: bool = True, timeout: float = DEFAULT_TIMEOUT) -> bool:
         """Acquire the SQLite lock via BEGIN EXCLUSIVE transaction."""
+        # Prevent connection leak if acquire() is called without release()
+        if self._conn is not None and self._held:
+            self.release()
+
         start = time.monotonic()
         deadlock_warned = False
 
@@ -407,10 +414,11 @@ class SQLiteLockBackend(LockBackend):
             try:
                 conn = sqlite3.connect(
                     str(self._db_path),
-                    timeout=min(timeout, 1.0),
+                    timeout=min(timeout, 5.0),
                     isolation_level=None,
                 )
-                conn.execute("PRAGMA journal_mode=WAL")
+                # WAL mode is persistent (set in _initialize_db), no need
+                # to re-set on every acquire.
 
                 if exclusive:
                     conn.execute("BEGIN EXCLUSIVE")
@@ -545,13 +553,45 @@ class RedisLockBackend(LockBackend):
         self.auto_renew_interval = auto_renew_interval
 
         # Unique token for this lock holder (prevents releasing others' locks)
-        self._token = f"{self.agent_id}:{os.getpid()}:{time.monotonic()}"
+        self._token = f"{self.agent_id}:{os.getpid()}:{uuid.uuid4().hex[:12]}"
         self._lock_key = f"{self.key_prefix}lock:vector_store"
         self._info_key = f"{self.key_prefix}lock:vector_store:info"
         self._held = False
         self._renew_thread: Optional[threading.Thread] = None
         self._renew_stop = threading.Event()
         self._client = None
+
+    @staticmethod
+    def _validate_redis_url(url: str) -> str:
+        """Validate and sanitize a Redis connection URL.
+
+        Ensures the URL uses an allowed scheme (redis:// or rediss://) and
+        strips embedded credentials from the URL to avoid leaking them in
+        status output or logs.
+
+        Raises ValueError for malformed or disallowed URLs.
+        """
+        parsed = urlparse(url)
+        if parsed.scheme not in ("redis", "rediss"):
+            raise ValueError(
+                f"Invalid Redis URL scheme: {parsed.scheme!r}. "
+                f"Only 'redis://' and 'rediss://' are allowed."
+            )
+        if not parsed.hostname:
+            raise ValueError(f"Redis URL must include a hostname: {url!r}")
+        return url
+
+    @staticmethod
+    def _redact_redis_url(url: str) -> str:
+        """Return a redacted version of the Redis URL for safe logging.
+
+        Replaces any password component with '***'.
+        """
+        parsed = urlparse(url)
+        if parsed.password:
+            redacted = url.replace(f":{parsed.password}@", ":***@")
+            return redacted
+        return url
 
     def _get_client(self):
         """Lazily create the Redis client."""
@@ -563,6 +603,7 @@ class RedisLockBackend(LockBackend):
                     "Redis backend requires the 'redis' package. "
                     "Install with: pip install redis"
                 )
+            self._validate_redis_url(self.redis_url)
             self._client = redis_lib.from_url(self.redis_url, decode_responses=True)
         return self._client
 
@@ -572,16 +613,29 @@ class RedisLockBackend(LockBackend):
 
         def _renew_loop():
             client = self._get_client()
+            # Atomic Lua script: check token ownership and renew both keys
+            renew_script = """
+            if redis.call("get", KEYS[1]) == ARGV[1] then
+                redis.call("expire", KEYS[1], ARGV[2])
+                redis.call("expire", KEYS[2], ARGV[2])
+                return 1
+            else
+                return 0
+            end
+            """
             while not self._renew_stop.is_set():
                 self._renew_stop.wait(timeout=self.auto_renew_interval)
                 if self._renew_stop.is_set():
                     break
                 try:
-                    # Only renew if we still hold the lock
-                    current = client.get(self._lock_key)
-                    if current == self._token:
-                        client.expire(self._lock_key, int(ttl))
-                        client.expire(self._info_key, int(ttl))
+                    # Atomically check ownership and renew TTL
+                    result = client.eval(
+                        renew_script, 2,
+                        self._lock_key, self._info_key,
+                        self._token, int(ttl),
+                    )
+                    if result == 0:
+                        break  # We no longer hold the lock
                 except Exception:
                     break
 
@@ -624,7 +678,6 @@ class RedisLockBackend(LockBackend):
                     "acquired_iso": time.strftime(
                         "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)
                     ),
-                    "token": self._token,
                 })
                 client.set(self._info_key, info, ex=ttl)
                 self._held = True
@@ -635,7 +688,6 @@ class RedisLockBackend(LockBackend):
             elapsed = time.monotonic() - start
 
             if elapsed > DEADLOCK_THRESHOLD and not deadlock_warned:
-                import warnings
                 warnings.warn(
                     f"Potential deadlock on Redis lock {self._lock_key}. "
                     f"Waiting {elapsed:.0f}s for lock.",
@@ -691,7 +743,7 @@ class RedisLockBackend(LockBackend):
         return {
             "lock_type": "redis",
             "lock_key": self._lock_key,
-            "redis_url": self.redis_url,
+            "redis_url": self._redact_redis_url(self.redis_url),
             "is_held_locally": self._held,
             "holder_info": holder_info,
             "agent_id": self.agent_id,

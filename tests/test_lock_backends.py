@@ -426,6 +426,40 @@ class TestRedisLockBackend:
                 backend._get_client()
 
 
+# ── Redis URL Validation and Redaction ────────────────────────────────────────
+
+class TestRedisURLValidation:
+    """Tests for Redis URL validation and redaction utility methods."""
+
+    def test_valid_redis_url(self):
+        assert RedisLockBackend._validate_redis_url("redis://localhost:6379") == "redis://localhost:6379"
+
+    def test_valid_rediss_url(self):
+        assert RedisLockBackend._validate_redis_url("rediss://secure-host:6380") == "rediss://secure-host:6380"
+
+    def test_invalid_scheme_rejected(self):
+        with pytest.raises(ValueError, match="Invalid Redis URL scheme"):
+            RedisLockBackend._validate_redis_url("http://localhost:6379")
+
+    def test_no_hostname_rejected(self):
+        with pytest.raises(ValueError, match="must include a hostname"):
+            RedisLockBackend._validate_redis_url("redis://")
+
+    def test_redact_url_without_password(self):
+        result = RedisLockBackend._redact_redis_url("redis://localhost:6379")
+        assert result == "redis://localhost:6379"
+
+    def test_redact_url_with_password(self):
+        result = RedisLockBackend._redact_redis_url("redis://user:secretpass@host:6379")
+        assert "secretpass" not in result
+        assert "***" in result
+
+    def test_redact_url_preserves_host(self):
+        result = RedisLockBackend._redact_redis_url("redis://user:pass@myhost:6380/0")
+        assert "myhost" in result
+        assert "pass" not in result
+
+
 # ── create_lock() Factory ────────────────────────────────────────────────────
 
 class TestCreateLock:
