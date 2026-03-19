@@ -142,6 +142,8 @@ def get_effective_config(root: Path) -> dict:
         "batch_size": user_cfg.get("batch_size", DEFAULT_BATCH_SIZE),
         "include_patterns": user_cfg.get("include_patterns", []),
         "exclude_patterns": user_cfg.get("exclude_patterns", []),
+        "gpu_mode": user_cfg.get("gpu_acceleration", {}).get("mode", "auto"),
+        "log_provider": user_cfg.get("gpu_acceleration", {}).get("log_provider", True),
     }
 
 
@@ -485,6 +487,8 @@ def cmd_index(args):
         "provider": config["embedding_provider"],
         "model": config["embedding_model"],
         "api_key_env": config["embedding_api_key_env"],
+        "gpu_mode": config.get("gpu_mode", "auto"),
+        "log_provider": config.get("log_provider", True),
     }
     provider = create_provider(emb_config)
     cache = EmbeddingCache(index_dir / "embedding_cache")
@@ -643,6 +647,8 @@ def cmd_search(args):
         "provider": config["embedding_provider"],
         "model": config["embedding_model"],
         "api_key_env": config["embedding_api_key_env"],
+        "gpu_mode": config.get("gpu_mode", "auto"),
+        "log_provider": config.get("log_provider", True),
     }
     provider = create_provider(emb_config)
     query_embedding = provider.embed([query])[0]
@@ -760,14 +766,20 @@ def cmd_status(args):
     index_dir = root / config["index_path"]
 
     # Check dependencies
-    from deps_check import check_vector_memory_deps
+    from deps_check import check_vector_memory_deps, detect_gpu_providers
     deps_ok, missing = check_vector_memory_deps()
+
+    gpu_providers = detect_gpu_providers()
+    gpu_mode = config.get("gpu_mode", "auto")
 
     status = {
         "enabled": config.get("enabled", False),
         "dependencies_installed": deps_ok,
         "missing_dependencies": missing,
         "index_path": str(index_dir),
+        "gpu_mode": gpu_mode,
+        "gpu_providers_available": gpu_providers,
+        "gpu_active": bool(gpu_providers) and gpu_mode != "cpu",
     }
 
     meta_path = index_dir / INDEX_META
