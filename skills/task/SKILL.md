@@ -337,6 +337,8 @@ Present: "Found **N pending tasks** for release X.X.X. **M can run in parallel**
 
 #### Step 3a: Parallel execution (default)
 
+**Worktree guard:** Before spawning parallel agents, check `SH context` → `worktree` data. If `worktrees.enabled` is `false` in the project config (the default), **skip this step entirely** and fall through to **Step 3b** (sequential execution). Log: "Worktrees are disabled — using sequential execution on the shared release branch." This is required because `isolation: "worktree"` creates `.claude/worktrees/agent-*/` directories, violating the user's worktree-disabled configuration. Without isolation, parallel agents would conflict on the shared branch.
+
 For each batch, spawn Agent subagents with `isolation: "worktree"` and `mode: "bypassPermissions"`:
 
 ```
@@ -528,6 +530,8 @@ GATE: "Create tasks from all ideas" / "Cancel"
 
 #### Step 2a: Parallel execution (default)
 
+**Worktree guard:** Before spawning parallel agents, check `SH context` → `worktree` data. If `worktrees.enabled` is `false` in the project config (the default), **skip this step entirely** and fall through to **Step 2b** (sequential execution). Log: "Worktrees are disabled — using sequential execution on the shared release branch." This prevents `isolation: "worktree"` from creating `.claude/worktrees/agent-*/` directories when the user has disabled worktrees.
+
 For each idea, spawn Agent subagents with `isolation: "worktree"` and `mode: "bypassPermissions"`:
 
 ```
@@ -650,6 +654,8 @@ Present: "Found **N in-progress tasks** to continue."
 GATE: "Spawn agents to continue all tasks" / "Cancel"
 
 #### Step 2a: Parallel execution (default)
+
+**Worktree guard:** Before spawning parallel agents, check `SH context` → `worktree` data. If `worktrees.enabled` is `false` in the project config (the default), **skip this step entirely** and fall through to **Step 2b** (sequential execution). Log: "Worktrees are disabled — using sequential execution on the shared release branch." This prevents `isolation: "worktree"` from creating `.claude/worktrees/agent-*/` directories when the user has disabled worktrees.
 
 For each in-progress task, spawn Agent subagents with `isolation: "worktree"` and `mode: "bypassPermissions"`:
 
