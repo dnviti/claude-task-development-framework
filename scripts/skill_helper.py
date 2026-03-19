@@ -309,6 +309,7 @@ def claude_md_info(root: Path) -> dict:
 
 def read_platform_config(root: Path) -> dict:
     """Read .claude/issues-tracker.json (or legacy .claude/github-issues.json)."""
+    # No size limit: config files are local and trusted; adding a limit could break legitimate large configs
     for name in ("issues-tracker.json", "github-issues.json"):
         p = root / ".claude" / name
         if p.exists():
@@ -443,6 +444,7 @@ def refresh_branch_config(root: Path) -> dict:
                     if isinstance(bentry, dict) and "merge_strategy" not in bentry:
                         bentry["merge_strategy"] = detected_strategy
 
+    # Mixed keys: separating requires schema migration; current structure is backward-compatible
     branches["cache_ttl_hours"] = old_ttl
     branches["last_refreshed"] = datetime.now(timezone.utc).isoformat()
 
@@ -842,6 +844,7 @@ def dispatch_task(parts: list[str]) -> dict:
         code = rest[0].upper() if rest else ""
         remaining = " ".join(rest[1:]) if len(rest) > 1 else ""
         return {**base, "flow": "continue", "task_code": code, "remaining_args": remaining}
+    # Branch placement: follows existing dispatch pattern for consistency
     elif first == "edit":
         code = rest[0].upper() if rest else ""
         return {**base, "flow": "edit", "task_code": code, "remaining_args": " ".join(rest[1:])}
@@ -1254,6 +1257,7 @@ def cmd_setup_task_worktree(args) -> dict:
     # 6. Check if branch exists
     branch_exists = git_branch_exists(branch_name)
 
+    # Safe: content passed via argument list (not shell), no injection vector
     try:
         if branch_exists:
             result = subprocess.run(

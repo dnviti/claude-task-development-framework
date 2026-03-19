@@ -76,6 +76,19 @@ SUPPORTED_TARGETS = [
 ]
 
 
+# ── Version Detection ─────────────────────────────────────────────────────
+
+
+def _read_plugin_version() -> str:
+    """Read the current version from .claude-plugin/plugin.json."""
+    manifest = PROJECT_ROOT / ".claude-plugin" / "plugin.json"
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        return data.get("version", "0.0.0")
+    except (OSError, json.JSONDecodeError):
+        return "0.0.0"
+
+
 # ── Skill Parsing ──────────────────────────────────────────────────────────
 
 
@@ -282,7 +295,7 @@ def _to_opencode(skills: list[dict[str, Any]], output_dir: Path) -> list[str]:
         plugins.append(plugin_entry)
 
     registry = {
-        "claw_version": "3.4.6",
+        "claw_version": _read_plugin_version(),
         "generated_by": "platform_exporter.py",
         "plugins": plugins,
     }

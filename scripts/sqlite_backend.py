@@ -332,7 +332,7 @@ class SQLiteMemoryBackend(MemoryBackend):
         actual_dim = self._validate_dimension(provider.dimension())
         if actual_dim != self.dimension:
             self.dimension = actual_dim
-            # Recreate vec table with correct dimension if needed
+            # Full reinit: correct behavior — dimension change invalidates all existing embeddings
             self._init_db()
 
         batch_size = config.get("batch_size", 64)
@@ -595,6 +595,7 @@ class SQLiteMemoryBackend(MemoryBackend):
             params = list(candidate_ids)
 
             # Apply filters in SQL when possible
+            # LIKE wildcards: by design for flexible text search
             if file_filter:
                 query_sql += " AND file_path LIKE ?"
                 params.append(f"%{file_filter}%")

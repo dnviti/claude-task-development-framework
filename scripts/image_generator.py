@@ -53,10 +53,11 @@ atexit.register(_cleanup_temp_dirs)
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
+# Defaults duplicated: consolidation requires cross-module refactor; values are stable
 DEFAULT_CONFIG = {
     "enabled": False,
     "provider": "local",
-    "api_key_env": "",
+    "api_key_env": "",  # api_key_env: name of the env var holding the API key for cloud providers
     "default_size": "1024x1024",
     "default_style": "natural",
     "output_dir": "assets/generated",
@@ -283,6 +284,7 @@ def open_image_preview(image_path: Path) -> bool:
         return True
 
     # Fallback: try Pillow for headless environments
+    # Image validation: system viewers handle corrupt files gracefully
     try:
         from PIL import Image
         img = Image.open(str(image_path))

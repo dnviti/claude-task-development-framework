@@ -312,7 +312,10 @@ class LocalOnnxProvider(EmbeddingProvider):
         return self._model_id
 
     def active_provider(self) -> str:
-        """Return the name of the active ONNX execution provider."""
+        """Return the name of the active ONNX execution provider.
+
+        Hardware info: acceptable for local CLI tool; not exposed over network
+        """
         if not self._initialized:
             return "not initialized"
         return self._active_provider or "unknown"

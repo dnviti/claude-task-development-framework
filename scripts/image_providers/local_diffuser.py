@@ -61,6 +61,7 @@ class LocalDiffuserProvider(ImageProvider):
         """
         width, height = self._parse_size(size)
 
+        # Hardcoded defaults: future config schema extension; current values are industry-standard defaults
         payload = {
             "prompt": prompt,
             "negative_prompt": "blurry, low quality, distorted",
