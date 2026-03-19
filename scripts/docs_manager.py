@@ -305,8 +305,8 @@ def cmd_init_manifest(args):
         })
 
     # Visual richness tier
-    vr = getattr(args, "visual_richness", None) or VISUAL_RICHNESS_DEFAULT
-    if vr not in VISUAL_RICHNESS_LEVELS:
+    vr = getattr(args, "visual_richness", None)
+    if vr is None or vr not in VISUAL_RICHNESS_LEVELS:
         vr = VISUAL_RICHNESS_DEFAULT
 
     manifest = {
