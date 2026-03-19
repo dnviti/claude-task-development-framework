@@ -54,9 +54,24 @@ def _check_mcp_sdk() -> bool:
 
 # ── Resource Helpers ─────────────────────────────────────────────────────────
 
+from mcp_tools import is_enabled
+
+
 def _build_status(root: str) -> dict:
     """Build a status dict describing the vector memory index."""
     root_path = Path(root).resolve()
+
+    # If vector memory is disabled by config, return immediately
+    if not is_enabled(root):
+        return {
+            "status": "disabled_by_config",
+            "enabled": False,
+            "message": (
+                "Vector memory is disabled via vector_memory.enabled=false "
+                "in project-config.json. Set it to true to enable."
+            ),
+            "namespaces": _list_namespaces(root_path),
+        }
 
     # Try to get status from vector_memory.py
     vm_script = _SCRIPT_DIR / "vector_memory.py"
@@ -107,20 +122,29 @@ def create_server(root: str = "."):
     """Create and configure the MCP server instance.
 
     Returns the ``FastMCP`` object ready for ``run()``.
+
+    When ``vector_memory.enabled`` is ``false`` in the project config, the
+    server starts without registering vector memory tools (index_repository,
+    semantic_search, store_memory, get_task_context).  The ``memory://status``
+    resource is always registered and reports ``disabled_by_config`` when the
+    toggle is off.
     """
     from mcp.server.fastmcp import FastMCP
 
     server = FastMCP("claw-vector-memory")
 
-    # ── Register tools ──
-    from mcp_tools import index, search, store, task_context
+    # ── Conditionally register vector memory tools ──
+    vm_enabled = is_enabled(root)
 
-    index.register(server)
-    search.register(server)
-    store.register(server)
-    task_context.register(server)
+    if vm_enabled:
+        from mcp_tools import index, search, store, task_context
 
-    # ── Register resources ──
+        index.register(server)
+        search.register(server)
+        store.register(server)
+        task_context.register(server)
+
+    # ── Register resources (always available) ──
     @server.resource("memory://status")
     async def resource_status() -> str:
         """Current vector memory index status and available namespaces."""
