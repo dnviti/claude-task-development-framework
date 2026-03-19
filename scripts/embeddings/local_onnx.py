@@ -23,8 +23,6 @@ import urllib.request
 import urllib.error
 import urllib.parse
 from pathlib import Path
-from typing import Optional
-
 from embeddings import EmbeddingProvider
 
 
@@ -88,6 +86,9 @@ _ALLOWED_DOWNLOAD_HOSTS = {"huggingface.co"}
 # project-config.json > vector_memory.download_timeout).
 _DEFAULT_DOWNLOAD_TIMEOUT = 300
 
+# Maximum allowed timeout to prevent indefinite hangs from misconfiguration.
+_MAX_DOWNLOAD_TIMEOUT = 3600
+
 # Retry configuration for transient network failures
 _DOWNLOAD_MAX_RETRIES = 3
 _DOWNLOAD_BACKOFF_BASE = 2  # seconds; retries wait 2, 4, 8 ...
@@ -129,7 +130,7 @@ def _load_download_timeout() -> int:
                     "download_timeout"
                 )
                 if isinstance(timeout, (int, float)) and timeout > 0:
-                    return int(timeout)
+                    return min(int(timeout), _MAX_DOWNLOAD_TIMEOUT)
             except (json.JSONDecodeError, OSError):
                 continue
     return _DEFAULT_DOWNLOAD_TIMEOUT
@@ -197,6 +198,9 @@ def _download_file(url: str, dest: Path, *,
     of ``urlretrieve``. Implements exponential backoff for transient
     network errors and validates the downloaded file afterward.
 
+    The URL host is validated against ``_ALLOWED_DOWNLOAD_HOSTS`` to
+    prevent SSRF, even when called outside ``_ensure_model_files()``.
+
     Args:
         url:     Remote URL to download.
         dest:    Local path to write the file to.
@@ -204,7 +208,20 @@ def _download_file(url: str, dest: Path, *,
                  or ``_DEFAULT_DOWNLOAD_TIMEOUT``).
         label:   Human-readable label for progress messages
                  (e.g. ``"model.onnx"``).
+
+    Raises:
+        RuntimeError: If the URL host is not in the allowed list, or
+                      if the download fails after all retries.
     """
+    # Validate URL host to prevent SSRF
+    parsed = urllib.parse.urlparse(url)
+    if parsed.hostname not in _ALLOWED_DOWNLOAD_HOSTS:
+        raise RuntimeError(
+            f"Download URL host '{parsed.hostname}' is not in the "
+            f"allowed list: {_ALLOWED_DOWNLOAD_HOSTS}. "
+            f"Only HuggingFace downloads are permitted."
+        )
+
     if timeout is None:
         timeout = _load_download_timeout()
 
@@ -793,6 +810,9 @@ class LocalOnnxProvider(EmbeddingProvider):
 
         self._model_dir.mkdir(parents=True, exist_ok=True)
 
+        # Load timeout once for all downloads to avoid re-reading config
+        download_timeout = _load_download_timeout()
+
         for filename, url in files_to_download:
             dest = self._model_dir / filename
             if dest.exists():
@@ -802,6 +822,7 @@ class LocalOnnxProvider(EmbeddingProvider):
             try:
                 _download_file(
                     url, dest,
+                    timeout=download_timeout,
                     label=f"{self._model_id}/{filename}",
                 )
             except RuntimeError as e:

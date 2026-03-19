@@ -170,6 +170,22 @@ class TestLoadDownloadTimeout:
         monkeypatch.chdir(tmp_path)
         assert _load_download_timeout() == _DEFAULT_DOWNLOAD_TIMEOUT
 
+    def test_caps_excessive_timeout(self, tmp_path, monkeypatch):
+        """Timeout values above _MAX_DOWNLOAD_TIMEOUT are capped."""
+        from embeddings.local_onnx import (
+            _load_download_timeout, _MAX_DOWNLOAD_TIMEOUT,
+        )
+
+        config_dir = tmp_path / ".claude"
+        config_dir.mkdir()
+        config_file = config_dir / "project-config.json"
+        config_file.write_text(json.dumps({
+            "vector_memory": {"download_timeout": 999999}
+        }))
+
+        monkeypatch.chdir(tmp_path)
+        assert _load_download_timeout() == _MAX_DOWNLOAD_TIMEOUT
+
 
 # ============================================================================
 # local_onnx: _download_file tests
@@ -340,6 +356,18 @@ class TestDownloadFile:
         tmp_file = dest.with_suffix(".json.tmp")
         assert not tmp_file.exists()
         assert dest.exists()
+
+    def test_rejects_non_allowed_host(self, tmp_path):
+        """SSRF prevention: rejects URLs whose host is not in allowlist."""
+        from embeddings.local_onnx import _download_file
+
+        dest = tmp_path / "evil.onnx"
+        with pytest.raises(RuntimeError, match="not in the allowed list"):
+            _download_file(
+                "https://evil-server.example.com/model.onnx",
+                dest,
+                timeout=10,
+            )
 
 
 # ============================================================================
