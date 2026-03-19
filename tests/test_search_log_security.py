@@ -16,7 +16,7 @@ import stat
 import sys
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -78,6 +78,12 @@ class TestSearchLogDefaults:
 class TestSearchLogOptIn:
     """Verify search logging is opt-in only."""
 
+    @pytest.fixture(autouse=True)
+    def _reset_flags(self):
+        """Reset module-level flags before each test."""
+        import vector_memory
+        vector_memory._search_log_purge_done = False
+
     def test_log_search_noop_when_disabled(self, tmp_path):
         """_log_search returns immediately when search_log is disabled."""
         from vector_memory import _log_search
@@ -126,6 +132,12 @@ class TestSearchLogOptIn:
 
 class TestPrivacyNotice:
     """Verify privacy notice is emitted when search logging is active."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_flags(self):
+        """Reset module-level flags before each test."""
+        import vector_memory
+        vector_memory._search_log_purge_done = False
 
     def test_privacy_notice_emitted_on_first_use(self, tmp_path, capsys):
         """Privacy notice is printed to stderr on first search log call."""
@@ -184,6 +196,12 @@ class TestPrivacyNotice:
 
 class TestRetentionPurge:
     """Verify retention-based auto-purge of expired log entries."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_purge_flag(self):
+        """Reset the session-once purge flag before each test."""
+        import vector_memory
+        vector_memory._search_log_purge_done = False
 
     def test_purge_removes_old_entries(self, tmp_path):
         """Entries older than retention_days are purged."""
@@ -276,6 +294,12 @@ class TestRetentionPurge:
 class TestFilePermissions:
     """Verify log files are created with restrictive permissions."""
 
+    @pytest.fixture(autouse=True)
+    def _reset_flags(self):
+        """Reset module-level flags before each test."""
+        import vector_memory
+        vector_memory._search_log_purge_done = False
+
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason="POSIX file permissions not applicable on Windows",
@@ -309,6 +333,12 @@ class TestFilePermissions:
 
 class TestPathTraversal:
     """Verify path traversal guard prevents writes outside project root."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_flags(self):
+        """Reset module-level flags before each test."""
+        import vector_memory
+        vector_memory._search_log_purge_done = False
 
     def test_path_traversal_blocked(self, tmp_path, capsys):
         """Log path resolving outside project root is rejected."""

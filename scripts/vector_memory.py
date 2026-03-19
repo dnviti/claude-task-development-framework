@@ -717,6 +717,10 @@ def _save_meta(index_dir: Path, config: dict, file_count: int):
 # during this process lifetime, to avoid printing it on every search call.
 _search_log_privacy_notice_shown = False
 
+# Module-level flag to ensure retention purge runs at most once per process
+# lifetime, avoiding redundant O(n) read-parse-rewrite on every search call.
+_search_log_purge_done = False
+
 
 def _emit_privacy_notice() -> None:
     """Print a one-time privacy notice when search logging is active.
@@ -748,7 +752,15 @@ def _purge_expired_log_entries(log_path: Path, retention_days: int) -> None:
     timestamp are preserved (fail-safe).
 
     A retention_days value of 0 disables purging entirely.
+
+    Performance: purge runs at most once per process lifetime to avoid
+    redundant O(n) read-parse-rewrite on every search call.
     """
+    global _search_log_purge_done
+    if _search_log_purge_done:
+        return
+    _search_log_purge_done = True
+
     if retention_days <= 0:
         return
     if not log_path.exists():
@@ -784,8 +796,9 @@ def _purge_expired_log_entries(log_path: Path, retention_days: int) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             for line in kept:
                 f.write(line + "\n")
-    except OSError:
-        pass
+    except OSError as exc:
+        print(f"Warning: search log purge rewrite failed: {exc}",
+              file=sys.stderr)
 
 
 def _log_search(root: Path, config: dict, query: str, top_k: int,
