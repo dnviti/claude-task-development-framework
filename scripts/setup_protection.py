@@ -301,7 +301,14 @@ def main() -> None:
                                 args.status_checks, args.merge_queue)
 
     # Automatically cache the protection settings after applying them
-    role = "production"  # default role for the protected branch
+    # Infer role from branch name when possible
+    branch_lower = args.branch.lower()
+    if branch_lower in ("staging", "stage", "pre-prod"):
+        role = "staging"
+    elif branch_lower in ("develop", "dev", "development"):
+        role = "development"
+    else:
+        role = "production"
     cache_branch_protection(
         data, config_path,
         branch=args.branch,

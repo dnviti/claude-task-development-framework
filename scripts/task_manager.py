@@ -1305,10 +1305,9 @@ def _get_cached_merge_strategy(target_branch: str) -> str:
                     info = branches[target_branch]
                     if isinstance(info, dict):
                         return info.get("merge_strategy", "")
-                # Fall back to any branch with matching role
-                # If merging to a branch, check its config
+                # Fall back to the production branch's merge strategy
                 for bname, binfo in branches.items():
-                    if isinstance(binfo, dict) and binfo.get("merge_strategy"):
+                    if isinstance(binfo, dict) and binfo.get("role") == "production" and binfo.get("merge_strategy"):
                         return binfo["merge_strategy"]
             except (json.JSONDecodeError, OSError):
                 pass
@@ -1416,7 +1415,8 @@ def cmd_platform_cmd(args):
                 cmd += f" --jq '{params['jq']}'"
         elif op == "merge-pr":
             merge_flag = _get_cached_merge_flag(params.get("base", ""))
-            cmd = f'gh pr merge {params.get("url", "")} --auto {merge_flag}'
+            pr_url = _shlex_quote(params.get("url", ""))
+            cmd = f'gh pr merge {pr_url} --auto {merge_flag}'
         elif op == "create-release":
             cmd = f'gh release create "{params.get("tag", "")}" --repo "{repo}"'
             cmd += f' --title "{params.get("title", "")}"'
@@ -1517,7 +1517,8 @@ def cmd_platform_cmd(args):
             strategy = _get_cached_merge_strategy(params.get("base", ""))
             if strategy == "squash":
                 squash_flag = " --squash"
-            cmd = f'glab mr merge {params.get("number", "")} --auto-merge --when-pipeline-succeeds{squash_flag}'
+            mr_number = _shlex_quote(params.get("number", ""))
+            cmd = f'glab mr merge {mr_number} --auto-merge --when-pipeline-succeeds{squash_flag}'
         elif op == "create-release":
             cmd = f'glab release create "{params.get("tag", "")}" --name "{params.get("title", "")}"'
             cmd += f' --notes "{params.get("notes", "")}"'

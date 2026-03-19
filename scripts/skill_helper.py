@@ -16,6 +16,7 @@ import platform as platform_mod
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # ── Platform Adapter Support ───────────────────────────────────────────────
@@ -352,8 +353,6 @@ def refresh_branch_config(root: Path) -> dict:
 
     Returns the updated ``branches`` dict.
     """
-    from datetime import datetime, timezone
-
     cfg = read_platform_config(root)
     repo = cfg.get("repo", "")
     platform = cfg.get("platform", "github")
@@ -381,7 +380,7 @@ def refresh_branch_config(root: Path) -> dict:
             result = subprocess.run(
                 ["gh", "api", f"repos/{repo}/branches/{branch_name}/protection",
                  "-H", "Accept: application/vnd.github+json"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, timeout=30,
             )
             if result.returncode == 0:
                 try:
@@ -405,7 +404,7 @@ def refresh_branch_config(root: Path) -> dict:
             encoded = repo.replace("/", "%2F")
             result = subprocess.run(
                 ["glab", "api", f"projects/{encoded}/protected_branches/{branch_name}"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, timeout=30,
             )
             if result.returncode == 0:
                 try:
@@ -415,30 +414,34 @@ def refresh_branch_config(root: Path) -> dict:
                 except (json.JSONDecodeError, AttributeError):
                     pass
 
-        # Detect merge strategy from repo-level settings (GitHub only)
-        if platform == "github" and role == "production":
-            repo_result = subprocess.run(
-                ["gh", "api", f"repos/{repo}",
-                 "-H", "Accept: application/vnd.github+json",
-                 "--jq", ".allow_squash_merge,.allow_merge_commit,.allow_rebase_merge"],
-                capture_output=True, text=True,
-            )
-            if repo_result.returncode == 0:
-                lines = repo_result.stdout.strip().splitlines()
-                if len(lines) >= 3:
-                    allow_squash = lines[0].strip().lower() == "true"
-                    allow_merge = lines[1].strip().lower() == "true"
-                    allow_rebase = lines[2].strip().lower() == "true"
-                    if allow_squash and not allow_merge and not allow_rebase:
-                        entry["merge_strategy"] = "squash"
-                    elif allow_rebase and not allow_squash and not allow_merge:
-                        entry["merge_strategy"] = "rebase"
-                    elif allow_merge:
-                        entry["merge_strategy"] = "merge"
-                    else:
-                        entry["merge_strategy"] = "squash"  # default if multiple
-
         branches[branch_name] = entry
+
+    # Detect merge strategy from repo-level settings (GitHub only, once for all branches)
+    if platform == "github":
+        repo_result = subprocess.run(
+            ["gh", "api", f"repos/{repo}",
+             "-H", "Accept: application/vnd.github+json",
+             "--jq", ".allow_squash_merge,.allow_merge_commit,.allow_rebase_merge"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if repo_result.returncode == 0:
+            lines = repo_result.stdout.strip().splitlines()
+            if len(lines) >= 3:
+                allow_squash = lines[0].strip().lower() == "true"
+                allow_merge = lines[1].strip().lower() == "true"
+                allow_rebase = lines[2].strip().lower() == "true"
+                if allow_squash and not allow_merge and not allow_rebase:
+                    detected_strategy = "squash"
+                elif allow_rebase and not allow_squash and not allow_merge:
+                    detected_strategy = "rebase"
+                elif allow_merge:
+                    detected_strategy = "merge"
+                else:
+                    detected_strategy = "squash"  # default if multiple
+                # Apply to all branches (repo-level setting)
+                for bname, bentry in branches.items():
+                    if isinstance(bentry, dict) and "merge_strategy" not in bentry:
+                        bentry["merge_strategy"] = detected_strategy
 
     branches["cache_ttl_hours"] = old_ttl
     branches["last_refreshed"] = datetime.now(timezone.utc).isoformat()
@@ -450,8 +453,6 @@ def refresh_branch_config(root: Path) -> dict:
 
 def is_branch_cache_stale(root: Path) -> bool:
     """Return True if the cached branch config is missing or older than TTL."""
-    from datetime import datetime, timezone
-
     branches = get_cached_branch_config(root)
     if not branches or "last_refreshed" not in branches:
         return True
