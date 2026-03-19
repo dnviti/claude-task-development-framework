@@ -80,7 +80,11 @@ def _load_gpu_lib_paths_from_config() -> list[str]:
                 gpu_cfg = config.get("vector_memory", {}).get(
                     "gpu_acceleration", {}
                 )
-                return gpu_cfg.get("lib_paths", [])
+                raw_paths = gpu_cfg.get("lib_paths", [])
+                # Validate: must be a list of strings
+                if isinstance(raw_paths, list):
+                    return [p for p in raw_paths if isinstance(p, str)]
+                return []
             except (json.JSONDecodeError, OSError):
                 continue
     return []
@@ -94,6 +98,8 @@ def _inject_gpu_lib_paths(paths: list[str]) -> None:
     macOS:  no-op (CoreML is framework-based)
 
     Only injects paths that are not already present in the env var.
+    Validates that each path is an existing directory before injection
+    to prevent injection of arbitrary paths from config files.
     """
     if not paths:
         return
@@ -111,7 +117,11 @@ def _inject_gpu_lib_paths(paths: list[str]) -> None:
         return
 
     current = os.environ.get(env_var, "")
-    new_paths = [p for p in paths if p not in current]
+    # Only inject paths that exist as directories and are not already present
+    new_paths = [
+        p for p in paths
+        if p not in current and Path(p).is_dir()
+    ]
 
     if new_paths:
         prefix = separator.join(new_paths)

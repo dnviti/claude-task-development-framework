@@ -515,48 +515,29 @@ def _build_dummy_onnx_model() -> bytes | None:
     """Build a minimal ONNX model (Identity op) as in-memory bytes.
 
     Returns None if the onnx helper modules are unavailable.
-    Uses only numpy (already a dependency) and onnx IR byte construction.
     """
     try:
-        import numpy as np
+        from onnx import TensorProto, helper
 
-        # Minimal ONNX protobuf for an Identity model.
-        # This is a hand-crafted minimal valid ONNX protobuf:
-        # graph { input: X (float, 1x1), output: Y (float, 1x1),
-        #         node: Identity(X)->Y }
-        # Using raw protobuf bytes avoids the 'onnx' package dependency.
-        #
-        # Alternatively, try the onnx helper if available:
-        try:
-            from onnx import TensorProto, helper
-
-            X = helper.make_tensor_value_info("X", TensorProto.FLOAT, [1, 1])
-            Y = helper.make_tensor_value_info("Y", TensorProto.FLOAT, [1, 1])
-            node = helper.make_node("Identity", ["X"], ["Y"])
-            graph = helper.make_graph([node], "dummy", [X], [Y])
-            model = helper.make_model(graph, opset_imports=[
-                helper.make_opsetid("", 13)
-            ])
-            return model.SerializeToString()
-        except ImportError:
-            pass
-
-        # Fallback: raw minimal ONNX protobuf bytes
-        # This is a valid ONNX model with a single Identity op
-        # Pre-built bytes for a minimal valid model
-        import struct
-
-        # We cannot easily hand-build protobuf without the library,
-        # so skip the real session test when onnx is not installed.
-        return None
-
+        X = helper.make_tensor_value_info("X", TensorProto.FLOAT, [1, 1])
+        Y = helper.make_tensor_value_info("Y", TensorProto.FLOAT, [1, 1])
+        node = helper.make_node("Identity", ["X"], ["Y"])
+        graph = helper.make_graph([node], "dummy", [X], [Y])
+        model = helper.make_model(graph, opset_imports=[
+            helper.make_opsetid("", 13)
+        ])
+        return model.SerializeToString()
     except ImportError:
+        # onnx package not installed; skip real session test
         return None
 
 
 def _inject_lib_paths(lib_info: dict) -> None:
     """Inject discovered GPU library paths into os.environ for the current
     process.
+
+    Validates that each path is an existing directory before injection
+    to prevent injection of arbitrary paths.
 
     Args:
         lib_info: Dict from discover_gpu_lib_paths().
@@ -568,10 +549,11 @@ def _inject_lib_paths(lib_info: dict) -> None:
     current = os.environ.get(env_var, "")
     separator = ":" if lib_info["platform"] == "linux" else ";"
 
-    new_paths = []
-    for p in lib_info["paths"]:
-        if p not in current:
-            new_paths.append(p)
+    # Only inject paths that exist as directories and are not already present
+    new_paths = [
+        p for p in lib_info["paths"]
+        if p not in current and Path(p).is_dir()
+    ]
 
     if new_paths:
         prefix = separator.join(new_paths)
