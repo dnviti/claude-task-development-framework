@@ -44,8 +44,11 @@ _PROVIDER_PREFERENCE = [
     "ROCMExecutionProvider",
     "CoreMLExecutionProvider",
     "DmlExecutionProvider",
+    "OpenVINOExecutionProvider",
     "CPUExecutionProvider",
 ]
+
+_VALID_GPU_MODES = ("auto", "gpu", "cpu")
 
 
 def _detect_execution_providers(gpu_mode: str = "auto") -> list[str]:
@@ -59,8 +62,15 @@ def _detect_execution_providers(gpu_mode: str = "auto") -> list[str]:
         Ordered list of providers to pass to InferenceSession.
 
     Raises:
+        ValueError: If gpu_mode is not one of "auto", "gpu", "cpu".
         RuntimeError: If gpu_mode is "gpu" but no GPU provider is available.
     """
+    if gpu_mode not in _VALID_GPU_MODES:
+        raise ValueError(
+            f"Invalid gpu_mode={gpu_mode!r}. "
+            f"Must be one of: {', '.join(_VALID_GPU_MODES)}"
+        )
+
     if gpu_mode == "cpu":
         return ["CPUExecutionProvider"]
 
@@ -104,12 +114,14 @@ class LocalOnnxProvider(EmbeddingProvider):
 
     def __init__(self, model_name_or_path: str = "all-MiniLM-L6-v2",
                  model_dir: str | None = None,
-                 gpu_mode: str = "auto"):
+                 gpu_mode: str = "auto",
+                 log_provider: bool = True):
         self._model_id = model_name_or_path
         self._session = None
         self._tokenizer = None
         self._np = None
         self._gpu_mode = gpu_mode
+        self._log_provider = log_provider
         self._active_provider = None
 
         # Determine model directory
@@ -179,11 +191,12 @@ class LocalOnnxProvider(EmbeddingProvider):
         # Record which provider is actually active
         self._active_provider = self._session.get_providers()[0] \
             if self._session.get_providers() else providers[0]
-        print(
-            f"  ONNX provider: {self._active_provider} "
-            f"(mode={self._gpu_mode})",
-            file=sys.stderr, flush=True,
-        )
+        if self._log_provider:
+            print(
+                f"  ONNX provider: {self._active_provider} "
+                f"(mode={self._gpu_mode})",
+                file=sys.stderr, flush=True,
+            )
 
         self._initialized = True
 

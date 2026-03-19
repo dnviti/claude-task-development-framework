@@ -137,6 +137,7 @@ def get_effective_config(root: Path) -> dict:
         "include_patterns": user_cfg.get("include_patterns", []),
         "exclude_patterns": user_cfg.get("exclude_patterns", []),
         "gpu_mode": user_cfg.get("gpu_acceleration", {}).get("mode", "auto"),
+        "log_provider": user_cfg.get("gpu_acceleration", {}).get("log_provider", True),
     }
 
 
@@ -455,6 +456,7 @@ def cmd_index(args):
         "model": config["embedding_model"],
         "api_key_env": config["embedding_api_key_env"],
         "gpu_mode": config.get("gpu_mode", "auto"),
+        "log_provider": config.get("log_provider", True),
     }
     provider = create_provider(emb_config)
     cache = EmbeddingCache(index_dir / "embedding_cache")
@@ -614,6 +616,7 @@ def cmd_search(args):
         "model": config["embedding_model"],
         "api_key_env": config["embedding_api_key_env"],
         "gpu_mode": config.get("gpu_mode", "auto"),
+        "log_provider": config.get("log_provider", True),
     }
     provider = create_provider(emb_config)
     query_embedding = provider.embed([query])[0]
