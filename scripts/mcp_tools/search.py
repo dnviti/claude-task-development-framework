@@ -2,6 +2,10 @@
 
 Performs semantic search over the vector index via
 ``vector_memory.py search``.
+
+Glob-filtering logic is centralized in ``vector_memory.apply_search_filters``
+and invoked through the subprocess CLI interface.  This avoids duplicating
+the filter-building and sanitization code.
 """
 
 import json

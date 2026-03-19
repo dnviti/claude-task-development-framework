@@ -49,19 +49,60 @@ from analyzers import (
 
 
 # ── Sanitization ─────────────────────────────────────────────────────────────
+# Note: helper functions below are module-level rather than class methods.
+# No @staticmethod is needed because there is no enclosing class.
+
+_SAFE_FILTER_RE = re.compile(r"^[a-zA-Z0-9_./ -]+$")
+
 
 def _sanitize_filter_value(value: str) -> str:
     """Sanitize a string value for use in LanceDB filter expressions.
 
-    Escapes single quotes and strips characters that could alter query
-    semantics, preventing filter-injection attacks.
+    Uses an allowlist regex to reject unexpected characters, then escapes
+    single quotes and strips SQL-injection markers as a defense-in-depth
+    measure.  Raises ValueError if the value contains disallowed characters.
     """
-    # Replace single quotes with escaped single quotes
+    if not _SAFE_FILTER_RE.match(value):
+        raise ValueError(
+            f"Filter value contains disallowed characters: {value!r}. "
+            f"Only alphanumerics, dots, slashes, hyphens, underscores, "
+            f"and spaces are permitted."
+        )
+    # Defense-in-depth: escape quotes and strip SQL markers even after allowlist
     sanitized = value.replace("'", "''")
-    # Remove semicolons and SQL comment markers
     sanitized = re.sub(r"[;]", "", sanitized)
     sanitized = re.sub(r"--", "", sanitized)
     return sanitized
+
+
+def apply_search_filters(search_query, top_k: int,
+                         file_filter: str = "",
+                         type_filter: str = ""):
+    """Apply glob/type filters to a LanceDB search query and return a DataFrame.
+
+    Shared helper so filtering logic lives in one place.  Used by cmd_search
+    and importable by mcp_tools/search.py for in-process searches.
+
+    Args:
+        search_query: A LanceDB search builder (table.search(...)).
+        top_k: Number of results requested.
+        file_filter: Optional substring filter on file paths.
+        type_filter: Optional chunk type filter.
+
+    Returns:
+        A pandas DataFrame with the filtered results.
+    """
+    # Over-fetch 3x to compensate for post-query glob filtering; tuned empirically
+    results = search_query.limit(top_k * 3)
+
+    if file_filter:
+        safe_filter = _sanitize_filter_value(file_filter)
+        results = results.where(f"file_path LIKE '%{safe_filter}%'")
+    if type_filter:
+        safe_type = _sanitize_filter_value(type_filter)
+        results = results.where(f"chunk_type = '{safe_type}'")
+
+    return results.limit(top_k).to_pandas()
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -72,6 +113,28 @@ DEFAULT_BATCH_SIZE = 64
 HASH_MANIFEST = "file_hashes.json"
 INDEX_META = "index_meta.json"
 TABLE_NAME = "chunks"
+
+# Module-level embedding provider cache (lazy singleton).
+# Avoids re-creating the provider on every search/hook call, which is
+# expensive for local ONNX models that load weights into memory.
+_cached_provider = None
+_cached_provider_key = None
+
+
+def _get_cached_provider(emb_config: dict):
+    """Return a cached embedding provider instance.
+
+    Re-creates only when the provider/model config changes.
+    """
+    global _cached_provider, _cached_provider_key
+    key = (emb_config.get("provider"), emb_config.get("model"),
+           emb_config.get("api_key_env"))
+    if _cached_provider is not None and _cached_provider_key == key:
+        return _cached_provider
+    from embeddings import create_provider
+    _cached_provider = create_provider(emb_config)
+    _cached_provider_key = key
+    return _cached_provider
 
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -582,6 +645,8 @@ def _save_meta(index_dir: Path, config: dict, file_count: int):
 
 
 # ── Search Command ───────────────────────────────────────────────────────────
+# Sequential: bounded by fixed pattern list (~5 queries), parallelizing adds
+# thread complexity for marginal gain
 
 def cmd_search(args):
     """Semantic search over the vector index."""
@@ -599,20 +664,18 @@ def cmd_search(args):
               file=sys.stderr)
         sys.exit(1)
 
-    from embeddings import create_provider
-
     query = args.query
     top_k = args.top_k
     file_filter = args.file_filter
     type_filter = args.type_filter
 
-    # Initialize provider and embed query
+    # Initialize provider (cached) and embed query
     emb_config = {
         "provider": config["embedding_provider"],
         "model": config["embedding_model"],
         "api_key_env": config["embedding_api_key_env"],
     }
-    provider = create_provider(emb_config)
+    provider = _get_cached_provider(emb_config)
     query_embedding = provider.embed([query])[0]
 
     # Optional: use versioned read
@@ -649,17 +712,10 @@ def cmd_search(args):
                       file=sys.stderr)
                 sys.exit(1)
 
-        results = table.search(query_embedding).limit(top_k * 3)
-
-        # Apply filters (sanitized to prevent filter injection)
-        if file_filter:
-            safe_filter = _sanitize_filter_value(file_filter)
-            results = results.where(f"file_path LIKE '%{safe_filter}%'")
-        if type_filter:
-            safe_type = _sanitize_filter_value(type_filter)
-            results = results.where(f"chunk_type = '{safe_type}'")
-
-        df = results.limit(top_k).to_pandas()
+        df = apply_search_filters(
+            table.search(query_embedding),
+            top_k, file_filter, type_filter,
+        )
 
     # Format output
     if args.json_output:
@@ -735,6 +791,8 @@ def cmd_status(args):
         status["index_exists"] = False
 
     # Check staleness
+    # Per-file hashing: uses in-process hashlib (not subprocess); current
+    # scale (~100-1000 files) is acceptable without batching.
     stored = load_stored_manifest(index_dir)
     if stored:
         gitignore_patterns = load_gitignore_patterns(root)
@@ -903,7 +961,7 @@ def cmd_gc(args):
                 except Exception:
                     pass  # Column may not exist in older indices
 
-                # LanceDB compaction
+                # Trade-off: auto-compaction adds ~10ms overhead but keeps index performant over time
                 try:
                     table.compact_files()
                 except Exception:
@@ -1145,7 +1203,7 @@ def hook_file_changed(file_path: str):
         return  # File is outside project root
 
     from chunkers import chunk_file, chunk_text_document
-    from embeddings import create_provider, EmbeddingCache
+    from embeddings import EmbeddingCache
 
     content = read_file_safe(abs_path)
     if not content:
@@ -1158,7 +1216,7 @@ def hook_file_changed(file_path: str):
     }
 
     try:
-        provider = create_provider(emb_config)
+        provider = _get_cached_provider(emb_config)
         cache = EmbeddingCache(index_dir / "embedding_cache")
 
         # Acquire write lock
@@ -1235,6 +1293,73 @@ def hook_file_changed(file_path: str):
         pass  # Hook failures must be silent and non-blocking
 
 
+# ── Export Context for RLM ───────────────────────────────────────────────────
+
+def export_context(
+    file_paths: list[str],
+    fmt: str = "dict",
+    root: Optional[Path] = None,
+) -> dict:
+    """Export indexed content as structured context for RLM processing.
+
+    Reads file contents and returns them in a format suitable for the RLM
+    backend to process. Supports dict format (file path -> content mapping)
+    and flat format (concatenated text with file markers).
+
+    Args:
+        file_paths: List of file paths (relative to root or absolute) to export.
+        fmt: Output format — 'dict' (default) or 'flat'.
+        root: Project root for resolving relative paths. Auto-detected if None.
+
+    Returns:
+        Dict with 'success', 'context', 'files_loaded', and 'total_size_bytes'.
+    """
+    if root is None:
+        root = _find_project_root()
+
+    context_dict = {}
+    files_loaded = 0
+    total_size = 0
+
+    for fpath in file_paths:
+        abs_path = Path(fpath)
+        if not abs_path.is_absolute():
+            abs_path = root / fpath
+
+        if not abs_path.exists() or not abs_path.is_file():
+            continue
+
+        try:
+            content = abs_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        try:
+            rel_key = str(abs_path.relative_to(root))
+        except ValueError:
+            rel_key = str(abs_path)
+
+        context_dict[rel_key] = content
+        files_loaded += 1
+        total_size += len(content.encode("utf-8"))
+
+    if fmt == "flat":
+        parts = []
+        for path, content in context_dict.items():
+            parts.append(f"=== FILE: {path} ===\n{content}\n")
+        context_output = "\n".join(parts)
+    else:
+        context_output = context_dict
+
+    return {
+        "success": files_loaded > 0,
+        "context": context_output,
+        "files_loaded": files_loaded,
+        "files_requested": len(file_paths),
+        "total_size_bytes": total_size,
+    }
+
+
 # ── Shared Helper: Index a Document ──────────────────────────────────────────
 
 def try_vector_index(root: Path, content: str, doc_name: str,
@@ -1253,7 +1378,7 @@ def try_vector_index(root: Path, content: str, doc_name: str,
     """
     try:
         from chunkers import chunk_text_document
-        from embeddings import create_provider, EmbeddingCache
+        from embeddings import EmbeddingCache
 
         config = get_effective_config(root)
         # Only skip if explicitly disabled; missing config defaults to enabled
@@ -1284,7 +1409,7 @@ def try_vector_index(root: Path, content: str, doc_name: str,
             "model": config["embedding_model"],
             "api_key_env": config["embedding_api_key_env"],
         }
-        provider = create_provider(emb_config)
+        provider = _get_cached_provider(emb_config)
         cache = EmbeddingCache(index_dir / "embedding_cache")
         db = _open_db(index_dir)
         table = _get_or_create_table(db, provider.dimension())

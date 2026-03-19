@@ -19,11 +19,23 @@ from typing import Optional
 
 
 class EmbeddingProvider(ABC):
-    """Abstract base class for embedding providers."""
+    """Abstract base class for embedding providers.
+
+    Implementations must return embedding vectors as lists of Python floats
+    (float32 precision). These are compatible with:
+    - LanceDB (pyarrow float32 arrays)
+    - sqlite-vec (little-endian float32 BLOBs via struct.pack)
+    - numpy (np.array(vec, dtype=np.float32))
+    """
 
     @abstractmethod
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed a batch of texts. Returns list of embedding vectors."""
+        """Embed a batch of texts. Returns list of embedding vectors.
+
+        Each vector is a list of Python floats at float32 precision,
+        suitable for direct conversion to numpy float32 arrays or
+        sqlite-vec BLOB format (little-endian float32).
+        """
         ...
 
     @abstractmethod
@@ -35,6 +47,16 @@ class EmbeddingProvider(ABC):
     def model_name(self) -> str:
         """Return the model identifier string."""
         ...
+
+    def embed_as_bytes(self, texts: list[str]) -> list[bytes]:
+        """Embed texts and return as little-endian float32 BLOBs.
+
+        Convenience method for backends that need raw bytes (e.g., sqlite-vec).
+        Default implementation converts embed() output via struct.pack.
+        """
+        import struct
+        vectors = self.embed(texts)
+        return [struct.pack(f"<{len(v)}f", *v) for v in vectors]
 
 
 class EmbeddingCache:
@@ -133,8 +155,12 @@ def create_provider(config: dict) -> EmbeddingProvider:
         from embeddings.local_onnx import LocalOnnxProvider
         model = config.get("model", "all-MiniLM-L6-v2")
         model_dir = config.get("model_dir")
+        gpu_mode = config.get("gpu_mode", "auto")
+        log_provider = config.get("log_provider", True)
         return LocalOnnxProvider(model_name_or_path=model,
-                                 model_dir=model_dir)
+                                 model_dir=model_dir,
+                                 gpu_mode=gpu_mode,
+                                 log_provider=log_provider)
 
     elif provider_type in ("openai", "voyage"):
         from embeddings.api_provider import ApiEmbeddingProvider

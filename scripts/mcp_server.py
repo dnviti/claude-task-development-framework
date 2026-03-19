@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MCP stdio server for the CTDF vector memory layer.
+"""MCP stdio server for the CodeClaw vector memory layer.
 
 Exposes the vector memory subsystem (VMEM-0017) as an MCP (Model Context
 Protocol) server using the stdio transport.  Any MCP-compatible AI assistant
@@ -7,12 +7,15 @@ Protocol) server using the stdio transport.  Any MCP-compatible AI assistant
 
 Tools provided:
     index_repository   — trigger codebase indexing (full or incremental)
-    semantic_search    — find relevant code and context
+    semantic_search    — find relevant code and context (orchestrator-aware)
     store_memory       — persist agent learnings and discoveries
     get_task_context   — retrieve comprehensive task-specific context
+    list_backends      — list configured memory backends and availability
+    backend_health     — check health status of memory backends
 
 Resources provided:
     memory://status    — current index status and available namespaces
+    memory://backends  — available backends and their health status
 
 Requirements:
     pip install mcp
@@ -54,9 +57,31 @@ def _check_mcp_sdk() -> bool:
 
 # ── Resource Helpers ─────────────────────────────────────────────────────────
 
+from mcp_tools import is_enabled
+
+
 def _build_status(root: str) -> dict:
-    """Build a status dict describing the vector memory index."""
+    """Build a status dict describing the vector memory index.
+
+    Uses get_cached_config() to avoid redundant config reads when this
+    resource is polled multiple times during a server session.
+    """
+    from mcp_tools import get_cached_config
+
     root_path = Path(root).resolve()
+    cached_cfg = get_cached_config(root)
+
+    # If vector memory is disabled by config, return immediately
+    if not is_enabled(root):
+        return {
+            "status": "disabled_by_config",
+            "enabled": False,
+            "message": (
+                "Vector memory is disabled via vector_memory.enabled=false "
+                "in project-config.json. Set it to true to enable."
+            ),
+            "namespaces": _list_namespaces(root_path),
+        }
 
     # Try to get status from vector_memory.py
     vm_script = _SCRIPT_DIR / "vector_memory.py"
@@ -77,9 +102,9 @@ def _build_status(root: str) -> dict:
         except Exception:
             pass
 
-    # Fallback: basic status
+    # Fallback: basic status using cached config
     return {
-        "enabled": False,
+        "enabled": cached_cfg.get("enabled", False),
         "dependencies_installed": False,
         "index_exists": False,
         "namespaces": _list_namespaces(root_path),
@@ -101,30 +126,115 @@ def _list_namespaces(root_path: Path) -> list[str]:
         return []
 
 
+def _build_backends_status(root: str) -> dict:
+    """Build a status dict describing available memory backends."""
+    root_path = Path(root).resolve()
+
+    try:
+        from memory_orchestrator import MemoryOrchestrator
+        orch = MemoryOrchestrator(root=root_path)
+        return orch.status()
+    except ImportError:
+        return {
+            "orchestrator_available": False,
+            "message": "memory_orchestrator.py not found. MORC-0040 must be installed.",
+        }
+    except Exception as e:
+        return {
+            "orchestrator_available": False,
+            "error": str(e),
+        }
+
+
 # ── Server Setup ─────────────────────────────────────────────────────────────
+
+def _load_lock_backend_config(root: str) -> dict:
+    """Load the lock_backend configuration from project-config.json.
+
+    Returns the lock_backend section with defaults applied.
+    Falls back gracefully if the config file is missing or malformed.
+    """
+    config_paths = [
+        Path(root).resolve() / ".claude" / "project-config.json",
+        Path(root).resolve() / "config" / "project-config.json",
+    ]
+    for cp in config_paths:
+        if cp.exists():
+            try:
+                # Config permissions: trusted local file, OS-level ACLs apply
+                data = json.loads(cp.read_text(encoding="utf-8"))
+                vm_cfg = data.get("vector_memory", {})
+                lb_cfg = vm_cfg.get("lock_backend", {})
+                return {
+                    "type": lb_cfg.get("type", "file"),
+                    "sqlite_path": lb_cfg.get(
+                        "sqlite_path", ".claude/memory/locks/lock.db"
+                    ),
+                    "redis_url": lb_cfg.get(
+                        "redis_url", "redis://localhost:6379"
+                    ),
+                    "redis_key_prefix": lb_cfg.get(
+                        "redis_key_prefix", "ctdf:"
+                    ),
+                    "timeout": lb_cfg.get("timeout", 30),
+                    "auto_renew_interval": lb_cfg.get(
+                        "auto_renew_interval", 10
+                    ),
+                }
+            except (json.JSONDecodeError, OSError):
+                pass
+    return {"type": "file", "timeout": 30}
+
 
 def create_server(root: str = "."):
     """Create and configure the MCP server instance.
 
     Returns the ``FastMCP`` object ready for ``run()``.
+
+    Loads the lock backend configuration and passes it to the
+    server context so tool handlers can access it.
+
+    When ``vector_memory.enabled`` is ``false`` in the project config, the
+    server starts without registering vector memory tools (index_repository,
+    semantic_search, store_memory, get_task_context).  The ``memory://status``
+    resource is always registered and reports ``disabled_by_config`` when the
+    toggle is off.
     """
     from mcp.server.fastmcp import FastMCP
 
-    server = FastMCP("ctdf-vector-memory")
+    server = FastMCP("claw-vector-memory")
 
-    # ── Register tools ──
-    from mcp_tools import index, search, store, task_context
+    # Load lock backend config for tool handlers
+    lock_backend_config = _load_lock_backend_config(root)
 
-    index.register(server)
-    search.register(server)
-    store.register(server)
-    task_context.register(server)
+    # Intentional: env vars propagate config to child processes (subprocess communication pattern)
+    os.environ.setdefault("CTDF_LOCK_BACKEND_TYPE", lock_backend_config.get("type", "file"))
 
-    # ── Register resources ──
+    # ── Conditionally register vector memory tools ──
+    vm_enabled = is_enabled(root)
+
+    if vm_enabled:
+        from mcp_tools import index, search, store, task_context
+        from mcp_tools import backends as backends_tools
+
+        index.register(server)
+        search.register(server)
+        store.register(server)
+        task_context.register(server)
+        backends_tools.register(server)
+
+    # ── Register resources (always available) ──
     @server.resource("memory://status")
     async def resource_status() -> str:
         """Current vector memory index status and available namespaces."""
-        return json.dumps(_build_status(root), indent=2)
+        status = _build_status(root)
+        status["lock_backend"] = lock_backend_config.get("type", "file")
+        return json.dumps(status, indent=2)
+
+    @server.resource("memory://backends")
+    async def resource_backends() -> str:
+        """Available memory backends and their health status."""
+        return json.dumps(_build_backends_status(root), indent=2)
 
     return server
 
@@ -139,7 +249,7 @@ def run_server(root: str = "."):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="CTDF Vector Memory MCP Server",
+        description="CodeClaw Vector Memory MCP Server",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
@@ -175,6 +285,8 @@ Configure your MCP client to launch this script as a subprocess.
             sys.exit(1)
 
     if not _check_mcp_sdk():
+        # Design: exit(0) is intentional — disabled MCP server should terminate
+        # cleanly, not error
         print(
             "Error: The 'mcp' Python package is not installed.\n"
             "Install all required packages with:\n"
@@ -185,8 +297,8 @@ Configure your MCP client to launch this script as a subprocess.
         )
         sys.exit(1)
 
-    # Set the project root in an env var so tool handlers can access it
-    os.environ.setdefault("CTDF_PROJECT_ROOT", str(Path(args.root).resolve()))
+    # Intentional: env vars propagate config to child processes (subprocess communication pattern)
+    os.environ.setdefault("CLAW_PROJECT_ROOT", str(Path(args.root).resolve()))
 
     run_server(args.root)
 
