@@ -111,6 +111,7 @@ DEFAULT_INDEX_DIR = ".claude/memory/vectors"
 DEFAULT_CHUNK_SIZE = 2000
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_SEARCH_LOG_MAX_SIZE_MB = 10
+DEFAULT_SEARCH_LOG_RETENTION_DAYS = 30
 HASH_MANIFEST = "file_hashes.json"
 INDEX_META = "index_meta.json"
 TABLE_NAME = "chunks"
@@ -216,10 +217,18 @@ def get_effective_config(root: Path) -> dict:
     to match the always-on default behavior introduced in VMEM-0024.
     """
     user_cfg = load_config(root)
+    # PRIVACY NOTE (RPAT-0003): Search logging records user queries and
+    # result metadata to disk in plaintext JSONL.  This data may contain
+    # sensitive information (proprietary code patterns, internal file paths,
+    # intellectual-property-revealing search terms).  Search logging is
+    # therefore DISABLED by default (opt-in only).  When enabled, log files
+    # are created with 0o600 permissions (owner read/write only) and are
+    # subject to automatic retention-based purging (see retention_days).
     search_log_defaults = {"enabled": False,
                            "path": ".claude/memory/search_log.jsonl",
                            "include_content": False,
-                           "max_size_mb": DEFAULT_SEARCH_LOG_MAX_SIZE_MB}
+                           "max_size_mb": DEFAULT_SEARCH_LOG_MAX_SIZE_MB,
+                           "retention_days": DEFAULT_SEARCH_LOG_RETENTION_DAYS}
     user_search_log = user_cfg.get("search_log", {})
     return {
         "enabled": user_cfg.get("enabled", True),
@@ -682,17 +691,142 @@ def _save_meta(index_dir: Path, config: dict, file_count: int):
 
 
 # ── Search Logging ───────────────────────────────────────────────────────────
+#
+# DATA SENSITIVITY WARNING (RPAT-0003):
+# Search logs contain user queries and result metadata written to disk as
+# plaintext JSONL.  This data can reveal:
+#   - Proprietary code patterns and internal API names
+#   - File paths exposing project structure and naming conventions
+#   - Intellectual property through search query terms
+#   - Developer workflow and investigation patterns
+#
+# Mitigations:
+#   S-0: Search logging is DISABLED by default (opt-in only via config).
+#   S-1: Path-traversal guard prevents log writes outside the project root.
+#   S-2: Privacy notice is printed to stderr the first time logging is used.
+#   S-3: Log files are created with 0o600 permissions (owner read/write only).
+#   S-4: Retention-based auto-purge removes entries older than retention_days.
+#   S-5: Rotated logs (.jsonl.1) inherit the same restrictive permissions.
+#
+# To enable search logging, set vector_memory.search_log.enabled = true in
+# project-config.json.  To control retention, set search_log.retention_days
+# (default 30).  Set to 0 to disable automatic purging.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Module-level flag to track whether the privacy notice has been shown
+# during this process lifetime, to avoid printing it on every search call.
+_search_log_privacy_notice_shown = False
+
+# Module-level flag to ensure retention purge runs at most once per process
+# lifetime, avoiding redundant O(n) read-parse-rewrite on every search call.
+_search_log_purge_done = False
+
+
+def _emit_privacy_notice() -> None:
+    """Print a one-time privacy notice when search logging is active.
+
+    S-2: Informs the user that search queries are being persisted to disk,
+    what data is captured, and how to disable logging or adjust retention.
+    """
+    global _search_log_privacy_notice_shown
+    if _search_log_privacy_notice_shown:
+        return
+    _search_log_privacy_notice_shown = True
+    print(
+        "PRIVACY NOTICE: Search query logging is enabled. Your search "
+        "queries, result metadata, and optionally content snippets are "
+        "being written to disk in plaintext. This data may contain "
+        "sensitive information. To disable, set "
+        "vector_memory.search_log.enabled to false in project-config.json. "
+        "Log retention is controlled by search_log.retention_days "
+        "(current default: 30 days).",
+        file=sys.stderr,
+    )
+
+
+def _purge_expired_log_entries(log_path: Path, retention_days: int) -> None:
+    """Remove log entries older than retention_days from the JSONL file.
+
+    S-4: Automatic retention-based purging reduces the window of exposure
+    for sensitive search query data on disk.  Entries without a parseable
+    timestamp are preserved (fail-safe).
+
+    A retention_days value of 0 disables purging entirely.
+
+    Performance: purge runs at most once per process lifetime to avoid
+    redundant O(n) read-parse-rewrite on every search call.
+    """
+    global _search_log_purge_done
+    if _search_log_purge_done:
+        return
+    _search_log_purge_done = True
+
+    if retention_days <= 0:
+        return
+    if not log_path.exists():
+        return
+
+    cutoff_ts = time.time() - (retention_days * 86400)
+    cutoff_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(cutoff_ts))
+
+    try:
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+
+    kept: list[str] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+            ts = entry.get("timestamp", "")
+            # ISO 8601 timestamps sort lexicographically
+            if ts and ts < cutoff_iso:
+                continue  # expired — drop
+        except (json.JSONDecodeError, TypeError):
+            pass  # Unparseable lines are kept (fail-safe)
+        kept.append(line)
+
+    # Rewrite the file with restrictive permissions
+    try:
+        fd = os.open(str(log_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                      0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for line in kept:
+                f.write(line + "\n")
+    except OSError as exc:
+        print(f"Warning: search log purge rewrite failed: {exc}",
+              file=sys.stderr)
+
 
 def _log_search(root: Path, config: dict, query: str, top_k: int,
                 file_filter: str, type_filter: str, df) -> None:
     """Append a JSONL entry for a search query if search_log is enabled.
 
     Non-blocking: failures are logged to stderr but never affect search.
-    Security: the log path is validated to stay within the project root.
+
+    Security controls:
+        S-0: Opt-in only — returns immediately if not explicitly enabled.
+        S-1: Path-traversal guard — log path must resolve within project root.
+        S-2: Privacy notice — printed to stderr on first invocation.
+        S-3: Restrictive file permissions — 0o600 (owner read/write only).
+        S-4: Retention purge — entries older than retention_days are removed.
+        S-5: Rotated log permissions — backup file also uses 0o600.
+
+    Data sensitivity: the log records query text, file paths, chunk types,
+    and optionally content snippets.  See the module-level DATA SENSITIVITY
+    WARNING above for the full risk assessment.
     """
     log_cfg = config.get("search_log", {})
+    # S-0: Search logging is opt-in; disabled by default
     if not log_cfg.get("enabled"):
         return
+
+    # S-2: Emit privacy notice on first use
+    _emit_privacy_notice()
+
     try:
         raw_path = log_cfg.get("path", ".claude/memory/search_log.jsonl")
         log_path = (root / raw_path).resolve()
@@ -707,6 +841,11 @@ def _log_search(root: Path, config: dict, query: str, top_k: int,
 
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # S-4: Purge expired entries based on retention_days
+        retention_days = log_cfg.get("retention_days",
+                                     DEFAULT_SEARCH_LOG_RETENTION_DAYS)
+        _purge_expired_log_entries(log_path, retention_days)
+
         # O-1: Rotate log if it exceeds configured max size
         max_bytes = log_cfg.get("max_size_mb",
                                 DEFAULT_SEARCH_LOG_MAX_SIZE_MB) * 1024 * 1024
@@ -715,6 +854,11 @@ def _log_search(root: Path, config: dict, query: str, top_k: int,
             if rotated.exists():
                 rotated.unlink()
             log_path.rename(rotated)
+            # S-5: Ensure rotated log retains restrictive permissions
+            try:
+                os.chmod(str(rotated), 0o600)
+            except OSError:
+                pass
 
         include_content = log_cfg.get("include_content", False)
         results = []
@@ -725,6 +869,9 @@ def _log_search(root: Path, config: dict, query: str, top_k: int,
                 "chunk_type": row.get("chunk_type", ""),
                 "score": float(row.get("_distance", 0.0)),
             }
+            # DATA SENSITIVITY: include_content exposes actual code snippets
+            # in the log.  This option is disabled by default and should only
+            # be enabled in trusted environments.
             if include_content:
                 entry["content"] = row.get("content", "")[:200]
             results.append(entry)
