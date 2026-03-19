@@ -803,16 +803,17 @@ def _platform_state_deduplicate(cli: str, repo: str) -> "int | None":
             pass
 
     # Remove triage labels that should not be on the release state issue.
-    for label in ("claude-code", "task", "status:todo"):
-        try:
-            subprocess.run(
-                [cli, "issue", "edit", str(canonical), "--repo", repo,
-                 "--remove-label", label],
-                capture_output=True, text=True, timeout=30,
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError,
-                subprocess.TimeoutExpired):
-            pass
+    # Use a single CLI call with comma-separated labels to avoid extra
+    # subprocess spawns (OPT-2).
+    try:
+        subprocess.run(
+            [cli, "issue", "edit", str(canonical), "--repo", repo,
+             "--remove-label", "claude-code,task,status:todo"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError,
+            subprocess.TimeoutExpired):
+        pass
 
     return canonical
 
