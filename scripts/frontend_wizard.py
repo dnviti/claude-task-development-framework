@@ -19,8 +19,6 @@ Usage:
 import argparse
 import colorsys
 import json
-import math
-import os
 import re
 import subprocess
 import sys
@@ -106,10 +104,16 @@ TEMPLATE_SEARCH_QUERIES = {
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _hex_to_hsl(hex_color: str) -> tuple[float, float, float]:
-    """Convert a hex color string to HSL (h: 0-360, s: 0-100, l: 0-100)."""
+    """Convert a hex color string to HSL (h: 0-360, s: 0-100, l: 0-100).
+
+    Raises:
+        ValueError: If hex_color is not a valid 3- or 6-digit hex color.
+    """
     hex_color = hex_color.lstrip("#")
     if len(hex_color) == 3:
         hex_color = "".join(c * 2 for c in hex_color)
+    if len(hex_color) != 6 or not re.match(r'^[0-9a-fA-F]{6}$', hex_color):
+        raise ValueError(f"Invalid hex color: #{hex_color}")
     r, g, b = (int(hex_color[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
     h, l, s = colorsys.rgb_to_hls(r, g, b)
     return round(h * 360, 1), round(s * 100, 1), round(l * 100, 1)
@@ -196,7 +200,11 @@ class FrontendWizard:
         """
         base_query = TEMPLATE_SEARCH_QUERIES.get(framework, f"{framework} template")
         if query:
-            search_query = f"{base_query} {query}"
+            # Sanitize user query: strip GitHub search operators to prevent
+            # query manipulation (e.g., injecting "is:private" or "org:...")
+            sanitized = re.sub(r'\b\w+:', '', query).strip()
+            sanitized = sanitized[:200]  # Cap query length
+            search_query = f"{base_query} {sanitized}" if sanitized else base_query
         else:
             search_query = base_query
 
@@ -599,20 +607,26 @@ class FrontendWizard:
         palettes = self.get_palettes()
         palette_names = list(palettes.keys())
 
-        # In yolo mode, auto-select first template and first palette
-        selected_template = templates[0] if templates else None
-        selected_palette_name = palette_names[0] if palette_names else None
-        selected_palette = (
-            palettes[selected_palette_name] if selected_palette_name else None
-        )
+        if yolo:
+            # In yolo mode, auto-select first template and first palette
+            selected_template = templates[0] if templates else None
+            selected_palette_name = palette_names[0] if palette_names else None
+            selected_palette = (
+                palettes[selected_palette_name] if selected_palette_name else None
+            )
 
-        # Step 4: Generate constraints
-        constraints = self.apply_design_constraints(
-            template=selected_template,
-            palette=selected_palette,
-            typography="modern",
-            motion=True,
-        )
+            # Generate constraints with auto-selected options
+            constraints = self.apply_design_constraints(
+                template=selected_template,
+                palette=selected_palette,
+                typography="modern",
+                motion=True,
+            )
+        else:
+            # In interactive mode, present options without auto-selecting
+            selected_template = None
+            selected_palette_name = None
+            constraints = None
 
         result = {
             "framework": framework,
@@ -669,7 +683,7 @@ def cmd_generate_palette(args):
 
     # Validate hex color format
     seed = args.seed.strip()
-    if not re.match(r"^#?[0-9a-fA-F]{3,6}$", seed):
+    if not re.match(r"^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", seed):
         print(json.dumps({"error": f"Invalid hex color: {seed}"}))
         sys.exit(1)
 
@@ -691,6 +705,9 @@ def cmd_apply_constraints(args):
         if args.palette in palettes:
             palette = palettes[args.palette]
         elif args.palette.startswith("#"):
+            if not re.match(r'^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$', args.palette):
+                print(json.dumps({"error": f"Invalid hex color: {args.palette}"}))
+                sys.exit(1)
             palette = wizard.generate_palette(args.palette)
         else:
             print(json.dumps({
@@ -797,8 +814,11 @@ def main():
     try:
         args = parser.parse_args()
         args.func(args)
-    except Exception as e:
+    except (ValueError, KeyError, TypeError) as e:
         print(json.dumps({"error": str(e), "type": type(e).__name__}))
+        sys.exit(1)
+    except Exception:
+        print(json.dumps({"error": "An unexpected error occurred", "type": "InternalError"}))
         sys.exit(1)
 
 

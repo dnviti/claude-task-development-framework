@@ -125,9 +125,7 @@ _FRONTEND_EXTENSIONS = {
 }
 _FRONTEND_DIRECTORIES = {
     "components", "pages", "views", "layouts", "templates",
-    "styles", "css", "public", "static", "assets",
-    "app", "src/components", "src/pages", "src/views",
-    "src/layouts", "src/styles",
+    "styles", "css", "public", "static", "assets", "app",
 }
 _FRONTEND_KEYWORDS = {
     "frontend", "front-end", "ui", "component", "page", "layout",
@@ -155,13 +153,11 @@ def is_frontend_task(task: dict) -> bool:
     # Check file extensions in files_create and files_modify
     for file_list_key in ("files_create", "files_modify"):
         for filepath in task.get(file_list_key, []):
-            path_lower = filepath.lower()
-            # Check extension
-            for ext in _FRONTEND_EXTENSIONS:
-                if path_lower.endswith(ext):
-                    return True
+            # O(1) extension check via set membership
+            if Path(filepath).suffix.lower() in _FRONTEND_EXTENSIONS:
+                return True
             # Check directory patterns
-            path_parts = path_lower.replace("\\", "/").split("/")
+            path_parts = filepath.lower().replace("\\", "/").split("/")
             for part in path_parts:
                 if part in _FRONTEND_DIRECTORIES:
                     return True
@@ -854,7 +850,11 @@ def cmd_is_frontend_task(args):
 
     if not block:
         # For platform-only mode, accept JSON task data via --json-body
+        _MAX_JSON_BODY_LEN = 100_000  # 100 KB limit to prevent DoS
         if args.json_body:
+            if len(args.json_body) > _MAX_JSON_BODY_LEN:
+                print(json.dumps({"error": "json-body exceeds 100KB limit", "is_frontend": False}))
+                sys.exit(1)
             try:
                 task_data = json.loads(args.json_body)
                 result = is_frontend_task(task_data)
