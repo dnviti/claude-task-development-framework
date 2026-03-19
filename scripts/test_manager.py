@@ -583,8 +583,7 @@ def _vmem_search(root: Path, query: str, top_k: int = 10,
         lock = None
         try:
             from memory_lock import MemoryLock
-            import os as _os
-            agent_id = _os.environ.get("CTDF_AGENT_ID", f"agent-{_os.getpid()}")
+            agent_id = os.environ.get("CTDF_AGENT_ID", f"agent-{os.getpid()}")
             lock = MemoryLock(index_dir, agent_id=agent_id)
         except ImportError:
             pass
@@ -597,7 +596,7 @@ def _vmem_search(root: Path, query: str, top_k: int = 10,
             except Exception:
                 return []
 
-            results = table.search(query_embedding).limit(top_k * 3)
+            results = table.search(query_embedding)
 
             if file_filter:
                 safe = _sanitize_filter_value(file_filter)
@@ -621,7 +620,14 @@ def _vmem_search(root: Path, query: str, top_k: int = 10,
                 "content": row.get("content", "")[:500],
             })
         return records
-    except Exception:
+    except Exception as exc:
+        # Graceful degradation: vector memory is optional.
+        # Log to stderr so failures are visible when debugging.
+        import logging
+        logging.getLogger(__name__).debug(
+            "Vector memory search unavailable: %s: %s",
+            type(exc).__name__, exc,
+        )
         return []
 
 
@@ -677,7 +683,7 @@ def semantic_gap_analysis(root: Path) -> dict:
                 })
                 categories_found[category] = categories_found.get(category, 0) + 1
 
-    # Deduplicate by (file_path, name) keeping highest score
+    # Deduplicate by (file_path, name) keeping best match (lowest distance)
     seen: dict[tuple[str, str], dict] = {}
     for risk in risks:
         key = (risk["file_path"], risk["name"])
@@ -858,6 +864,13 @@ def reindex_test(test_path: str, root: Path) -> dict:
     """
     root = root.resolve()
     abs_path = (root / test_path).resolve()
+
+    # Prevent path traversal outside project root
+    if not abs_path.is_relative_to(root):
+        return {
+            "success": False,
+            "error": f"Path escapes project root: {test_path}",
+        }
 
     if not abs_path.exists():
         return {"success": False, "error": f"File not found: {test_path}"}
