@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from mcp_tools import SCRIPTS_DIR as _SCRIPT_DIR
+from mcp_tools import SCRIPTS_DIR as _SCRIPT_DIR, resolve_main_repo_root
 
 TASK_CODE_RE = re.compile(r"^[A-Z]{3,5}-\d{4}$")
 SEPARATOR = "-" * 78
@@ -26,38 +26,21 @@ STATUS_MAP = {"[ ]": "todo", "[~]": "progressing", "[x]": "done", "[!]": "blocke
 def _find_project_root(root_hint: str) -> Path:
     """Resolve project root, following git worktrees to the main repo.
 
-    Uses ``git rev-parse --git-common-dir`` vs ``--git-dir`` to detect if
-    the resolved hint is inside a worktree, returning the main repository
-    root so that task files and memory storage are shared across worktrees.
+    Delegates to the shared ``resolve_main_repo_root`` helper and falls
+    back to a directory-walk when git is unavailable.
     """
-    import subprocess as _sp
-    hint = Path(root_hint).resolve()
-    try:
-        common = _sp.run(
-            ["git", "rev-parse", "--git-common-dir"],
-            capture_output=True, text=True, check=True,
-            cwd=str(hint),
-        ).stdout.strip()
-        git_dir = _sp.run(
-            ["git", "rev-parse", "--git-dir"],
-            capture_output=True, text=True, check=True,
-            cwd=str(hint),
-        ).stdout.strip()
-        common_path = Path(common).resolve()
-        git_dir_path = Path(git_dir).resolve()
-        if common_path != git_dir_path:
-            return common_path.parent
-        return git_dir_path.parent
-    except (FileNotFoundError, _sp.CalledProcessError):
-        pass
+    resolved = resolve_main_repo_root(root_hint)
+    # If the shared helper already found a repo root, return it
+    if (resolved / ".claude").is_dir() or (resolved / ".git").exists():
+        return resolved
 
     # Fallback: walk up from the hint directory
-    p = hint
+    p = Path(root_hint).resolve()
     while p != p.parent:
         if (p / ".claude").is_dir() or (p / ".git").exists():
             return p
         p = p.parent
-    return hint
+    return resolved
 
 
 def _parse_task_from_files(root: Path, task_id: str) -> dict | None:

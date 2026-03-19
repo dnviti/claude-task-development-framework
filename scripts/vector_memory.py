@@ -142,30 +142,28 @@ def _get_cached_provider(emb_config: dict):
 def _find_project_root() -> Path:
     """Find project root, resolving through git worktrees to the main repo.
 
-    Uses ``git rev-parse --git-common-dir`` vs ``--git-dir`` to detect if the
-    current working directory is inside a worktree.  When it is, the main
-    repository root is returned so that vector memory storage is shared across
-    all worktrees instead of being isolated per-worktree.
+    Uses a single ``git rev-parse --git-common-dir --git-dir`` call to detect
+    if the current working directory is inside a worktree.  When it is, the
+    main repository root is returned so that vector memory storage is shared
+    across all worktrees instead of being isolated per-worktree.
 
     Falls back to the legacy directory-walk approach when git is unavailable.
     """
     import subprocess as _sp
     try:
-        common = _sp.run(
-            ["git", "rev-parse", "--git-common-dir"],
+        result = _sp.run(
+            ["git", "rev-parse", "--git-common-dir", "--git-dir"],
             capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        git_dir = _sp.run(
-            ["git", "rev-parse", "--git-dir"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        common_path = Path(common).resolve()
-        git_dir_path = Path(git_dir).resolve()
-        if common_path != git_dir_path:
-            # Inside a worktree — common dir is <main-repo>/.git
-            return common_path.parent
-        # Not a worktree — git dir is <repo>/.git, return its parent
-        return git_dir_path.parent
+        )
+        lines = result.stdout.strip().splitlines()
+        if len(lines) >= 2:
+            common_path = Path(lines[0]).resolve()
+            git_dir_path = Path(lines[1]).resolve()
+            if common_path != git_dir_path:
+                # Inside a worktree — common dir is <main-repo>/.git
+                return common_path.parent
+            # Not a worktree — git dir is <repo>/.git, return its parent
+            return git_dir_path.parent
     except (FileNotFoundError, _sp.CalledProcessError):
         pass
 
