@@ -551,27 +551,14 @@ class MemoryOrchestrator:
     def _find_root(self) -> Path:
         """Auto-detect project root, resolving through git worktrees.
 
-        Uses ``git rev-parse --git-common-dir`` to detect worktrees so that
-        the orchestrator always operates on the main repo's shared memory.
-        Falls back to the legacy directory-walk approach when git is
-        unavailable.
+        Delegates to ``mcp_tools.resolve_main_repo_root()`` for worktree
+        resolution, falling back to the legacy directory-walk approach
+        when the import is unavailable.
         """
-        import subprocess as _sp
         try:
-            result = _sp.run(
-                ["git", "rev-parse", "--git-common-dir", "--git-dir"],
-                capture_output=True, text=True, check=True,
-            )
-            lines = result.stdout.strip().splitlines()
-            if len(lines) >= 2:
-                common_path = Path(lines[0]).resolve()
-                git_dir_path = Path(lines[1]).resolve()
-                if common_path != git_dir_path:
-                    # Inside a worktree — common dir is <main-repo>/.git
-                    return common_path.parent
-                # Not a worktree — git dir is <repo>/.git
-                return git_dir_path.parent
-        except (FileNotFoundError, _sp.CalledProcessError):
+            from mcp_tools import resolve_main_repo_root
+            return resolve_main_repo_root(".")
+        except ImportError:
             pass
 
         # Fallback: walk up directories looking for .claude/ or .git/

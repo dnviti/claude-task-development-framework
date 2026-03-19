@@ -42,31 +42,17 @@ DEFAULT_COMPACT_INTERVAL = 300  # seconds
 def _resolve_worktree_root(root: Path) -> Path:
     """Resolve root through git worktrees to the main repository.
 
-    Ensures that event logs are always written to the main repo's
-    ``.claude/memory/events/`` directory, even when called from an agent
-    running inside ``.claude/worktrees/``.
+    Delegates to ``mcp_tools.resolve_main_repo_root()`` — the single
+    canonical implementation — so that bug fixes and enhancements only
+    need to be applied in one place.
 
-    Falls back to ``Path(root).resolve()`` when git is unavailable.
+    Falls back to ``Path(root).resolve()`` when the import is unavailable.
     """
-    import subprocess as _sp
-    resolved = Path(root).resolve()
     try:
-        result = _sp.run(
-            ["git", "rev-parse", "--git-common-dir", "--git-dir"],
-            capture_output=True, text=True, check=True,
-            cwd=str(resolved),
-        )
-        lines = result.stdout.strip().splitlines()
-        if len(lines) >= 2:
-            common_path = Path(lines[0]).resolve()
-            git_dir_path = Path(lines[1]).resolve()
-            if common_path != git_dir_path:
-                # Inside a worktree — common dir is <main-repo>/.git
-                return common_path.parent
-            return git_dir_path.parent
-    except (FileNotFoundError, _sp.CalledProcessError):
-        pass
-    return resolved
+        from mcp_tools import resolve_main_repo_root
+        return resolve_main_repo_root(str(root))
+    except ImportError:
+        return Path(root).resolve()
 
 
 # ── Event Data Classes ───────────────────────────────────────────────────────
