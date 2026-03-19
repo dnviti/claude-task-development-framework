@@ -561,23 +561,28 @@ class SQLiteMemoryBackend(MemoryBackend):
             # Sort by hybrid score descending
             scored_ids.sort(key=lambda x: x[1], reverse=True)
 
-            # Fetch full chunk data for top-k results
+            # Fetch full chunk data for top-k results with SQL-level
+            # filtering to avoid returning fewer than top_k results when
+            # filters discard rows (optimization fix O5).
+            # Over-fetch to compensate, then trim to top_k.
             results = []
-            for chunk_id, score in scored_ids[:top_k]:
-                row = conn.execute(
-                    """SELECT id, file_path, chunk_type, name, start_line,
-                              end_line, language, file_role, content, content_hash
-                       FROM chunks WHERE id = ?""",
-                    (chunk_id,)
-                ).fetchone()
+            for chunk_id, score in scored_ids[:top_k * 3]:
+                # Build parameterized query with filters in SQL
+                sql = """SELECT id, file_path, chunk_type, name, start_line,
+                                end_line, language, file_role, content, content_hash
+                         FROM chunks WHERE id = ?"""
+                params: list = [chunk_id]
+
+                if file_filter:
+                    sql += " AND file_path LIKE ?"
+                    params.append(f"%{file_filter}%")
+                if type_filter:
+                    sql += " AND chunk_type = ?"
+                    params.append(type_filter)
+
+                row = conn.execute(sql, params).fetchone()
 
                 if row is None:
-                    continue
-
-                # Apply filters
-                if file_filter and file_filter not in row["file_path"]:
-                    continue
-                if type_filter and type_filter != row["chunk_type"]:
                     continue
 
                 results.append({
@@ -591,6 +596,9 @@ class SQLiteMemoryBackend(MemoryBackend):
                     "content": row["content"],
                     "content_hash": row["content_hash"],
                 })
+
+                if len(results) >= top_k:
+                    break
 
         return results
 

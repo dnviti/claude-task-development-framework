@@ -23,6 +23,7 @@ dependencies are loaded lazily and checked for availability at runtime.
 import json
 import os
 import sys
+import threading
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -233,10 +234,15 @@ class BackendRegistry:
         return None
 
     def _create_lancedb_backend(self):
-        """Create a LanceDB backend wrapper."""
+        """Create a LanceDB backend instance.
+
+        Delegates to vector_memory.LanceDBMemoryBackend to avoid code
+        duplication (optimization fix O1/O2).
+        """
         try:
-            return LanceDBBackendWrapper(self.root)
-        except Exception:
+            from vector_memory import create_lancedb_backend
+            return create_lancedb_backend(self.root)
+        except (ImportError, Exception):
             return None
 
     def _create_sqlite_backend(self):
@@ -313,152 +319,9 @@ class BackendRegistry:
 
 # ── Backend Wrappers ─────────────────────────────────────────────────────────
 
-class LanceDBBackendWrapper:
-    """Wrapper around LanceDB vector_memory.py operations.
-
-    Implements the same interface as MemoryBackend (search, index, status)
-    by delegating to vector_memory.py functions.
-    """
-
-    def __init__(self, root: Path):
-        self.root = root
-
-    def search(self, query: str, top_k: int = 10,
-               file_filter: str = "", type_filter: str = "") -> list[dict]:
-        """Search the LanceDB vector index."""
-        try:
-            from vector_memory import (
-                get_effective_config, _open_db, _sanitize_filter_value,
-                TABLE_NAME,
-            )
-            from embeddings import create_provider
-
-            config = get_effective_config(self.root)
-            index_dir = self.root / config["index_path"]
-
-            if not (index_dir / "lancedb").exists():
-                return []
-
-            emb_config = {
-                "provider": config["embedding_provider"],
-                "model": config["embedding_model"],
-                "api_key_env": config["embedding_api_key_env"],
-            }
-            provider = create_provider(emb_config)
-            query_embedding = provider.embed([query])[0]
-
-            db = _open_db(index_dir)
-            try:
-                table = db.open_table(TABLE_NAME)
-            except Exception:
-                return []
-
-            results = table.search(query_embedding).limit(top_k * 3)
-
-            if file_filter:
-                safe_filter = _sanitize_filter_value(file_filter)
-                results = results.where(f"file_path LIKE '%{safe_filter}%'")
-            if type_filter:
-                safe_type = _sanitize_filter_value(type_filter)
-                results = results.where(f"chunk_type = '{safe_type}'")
-
-            df = results.limit(top_k).to_pandas()
-
-            records = []
-            for _, row in df.iterrows():
-                records.append({
-                    "file_path": row.get("file_path", ""),
-                    "name": row.get("name", ""),
-                    "chunk_type": row.get("chunk_type", ""),
-                    "language": row.get("language", ""),
-                    "start_line": int(row.get("start_line", 0)),
-                    "end_line": int(row.get("end_line", 0)),
-                    "score": float(row.get("_distance", 0.0)),
-                    "content": row.get("content", ""),
-                    "backend": "lancedb",
-                })
-            return records
-
-        except Exception:
-            return []
-
-    def index(self, file_paths: list[str], root: Path, config: dict,
-              full: bool = False) -> dict:
-        """Index files into LanceDB (delegates to vector_memory.py)."""
-        import subprocess
-        cmd = [
-            sys.executable,
-            str(_SCRIPT_DIR / "vector_memory.py"),
-            "index",
-            "--root", str(root),
-        ]
-        if full:
-            cmd.append("--full")
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=600,
-            )
-            return {
-                "success": result.returncode == 0,
-                "output": result.stderr.strip(),
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def status(self) -> dict:
-        """Get LanceDB index status."""
-        try:
-            from vector_memory import (
-                get_effective_config, _open_db, _dir_size_mb, TABLE_NAME,
-                INDEX_META,
-            )
-
-            config = get_effective_config(self.root)
-            index_dir = self.root / config["index_path"]
-
-            result = {
-                "backend": "lancedb",
-                "index_exists": (index_dir / "lancedb").exists(),
-            }
-
-            if not result["index_exists"]:
-                result["total_chunks"] = 0
-                return result
-
-            meta_path = index_dir / INDEX_META
-            if meta_path.exists():
-                try:
-                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                    result["last_indexed"] = meta.get("last_indexed")
-                    result["indexed_files"] = meta.get("file_count", 0)
-                    result["embedding_model"] = meta.get("embedding_model")
-                except (json.JSONDecodeError, OSError):
-                    pass
-
-            result["index_size_mb"] = round(_dir_size_mb(index_dir), 2)
-            return result
-        except Exception as e:
-            return {"backend": "lancedb", "error": str(e)}
-
-    def gc(self, ttl_days: int = 30, deep: bool = False) -> dict:
-        """Garbage collection (delegates to vector_memory.py gc)."""
-        import subprocess
-        cmd = [
-            sys.executable,
-            str(_SCRIPT_DIR / "vector_memory.py"),
-            "gc",
-            "--root", str(self.root),
-            "--ttl-days", str(ttl_days),
-        ]
-        if deep:
-            cmd.append("--deep")
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=300,
-            )
-            return {"success": result.returncode == 0}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+# NOTE: LanceDBBackendWrapper has been removed (optimization fix O1/O2).
+# The orchestrator now delegates to vector_memory.LanceDBMemoryBackend
+# via create_lancedb_backend(), eliminating ~150 lines of duplicated code.
 
 
 class RLMBackendWrapper:
@@ -946,11 +809,13 @@ class MemoryOrchestrator:
 # ── Module-level convenience ─────────────────────────────────────────────────
 
 _orchestrator: Optional[MemoryOrchestrator] = None
+_orchestrator_lock = threading.Lock()
 
 
 def get_orchestrator(root: Optional[Path] = None) -> MemoryOrchestrator:
     """Get or create a module-level MemoryOrchestrator singleton.
 
+    Thread-safe via double-checked locking (optimization fix O3).
     The orchestrator is cached for the lifetime of the process.
 
     Args:
@@ -961,7 +826,9 @@ def get_orchestrator(root: Optional[Path] = None) -> MemoryOrchestrator:
     """
     global _orchestrator
     if _orchestrator is None:
-        _orchestrator = MemoryOrchestrator(root=root)
+        with _orchestrator_lock:
+            if _orchestrator is None:
+                _orchestrator = MemoryOrchestrator(root=root)
     return _orchestrator
 
 

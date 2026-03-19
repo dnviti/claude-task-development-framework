@@ -48,31 +48,10 @@ VALID_STRATEGIES = ("map-reduce", "iterative-refinement", "tree")
 # Chunk overlap for context splitting (percentage of chunk size)
 CHUNK_OVERLAP_RATIO = 0.1
 
-# RLM-specific model recommendations — models that excel at code generation
-# needed for the REPL analysis step
+# RLM-specific model recommendations — canonical Ollama list lives in
+# ollama_manager.RLM_MODEL_RECOMMENDATIONS (optimization fix O4).
+# Only cloud-specific entries are kept here.
 RLM_MODEL_RECOMMENDATIONS = {
-    "ollama": [
-        {
-            "min_ram": 32,
-            "name": "qwen2.5-coder:32b",
-            "reason": "Best code generation for RLM analysis steps",
-        },
-        {
-            "min_ram": 16,
-            "name": "codestral:22b",
-            "reason": "Strong code generation for RLM decomposition",
-        },
-        {
-            "min_ram": 8,
-            "name": "qwen2.5-coder:7b",
-            "reason": "Efficient code generation for basic RLM queries",
-        },
-        {
-            "min_ram": 0,
-            "name": "qwen2.5-coder:1.5b",
-            "reason": "Lightweight option for simple RLM analysis",
-        },
-    ],
     "claude": [
         {
             "name": "claude-sonnet-4-20250514",
@@ -80,6 +59,18 @@ RLM_MODEL_RECOMMENDATIONS = {
         },
     ],
 }
+
+def _get_ollama_rlm_recommendations() -> list[dict]:
+    """Get Ollama RLM model recommendations from the canonical source."""
+    try:
+        from ollama_manager import RLM_MODEL_RECOMMENDATIONS as ollama_recs
+        return ollama_recs
+    except ImportError:
+        # Fallback if ollama_manager is not available
+        return [
+            {"min_ram": 8, "name": "qwen2.5-coder:7b",
+             "reason": "Efficient code generation for basic RLM queries"},
+        ]
 
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -759,12 +750,17 @@ def _recursive_search(
 def get_model_recommendations(provider: str = "ollama") -> list[dict]:
     """Get RLM-specific model recommendations for the given provider.
 
+    Ollama recommendations are sourced from ollama_manager.py to avoid
+    duplication (optimization fix O4).
+
     Args:
         provider: 'ollama' or 'claude'.
 
     Returns:
         List of model recommendation dicts.
     """
+    if provider == "ollama":
+        return _get_ollama_rlm_recommendations()
     return RLM_MODEL_RECOMMENDATIONS.get(provider, [])
 
 

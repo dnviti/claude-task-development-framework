@@ -34,15 +34,36 @@ SAFE_MODULES = frozenset({
     "string", "unicodedata", "hashlib",
 })
 
-# Patterns that indicate potentially unsafe code
+# Patterns that indicate potentially unsafe code — expanded blocklist
+# covering both direct imports and indirect access methods
 UNSAFE_PATTERNS = [
+    # Direct imports of dangerous modules
     "import os", "import sys", "import subprocess",
     "import shutil", "import socket", "import http",
     "import urllib", "import requests", "import pathlib",
+    "import ctypes", "import pickle", "import marshal",
+    "import importlib", "import code", "import codeop",
+    "import signal", "import multiprocessing", "import threading",
+    "import webbrowser", "import antigravity",
+    # from-style imports
+    "from os", "from sys", "from subprocess",
+    "from shutil", "from socket", "from http",
+    "from urllib", "from pathlib", "from ctypes",
+    "from pickle", "from marshal", "from importlib",
+    "from signal", "from multiprocessing", "from threading",
+    # Dynamic import / eval / exec
     "__import__", "eval(", "exec(", "compile(",
+    "importlib", "imp.load",
+    # Filesystem / reflection
     "open(", "globals(", "locals(", "vars(",
     "getattr(", "setattr(", "delattr(",
     "breakpoint(", "exit(", "quit(",
+    # Object introspection escape hatches
+    "__subclasses__", "__bases__", "__mro__",
+    "__class__", "__code__", "__globals__",
+    "__builtins__", "__loader__", "__spec__",
+    # String obfuscation of builtins (chr-based bypass)
+    "chr(", "ord(",
 ]
 
 
@@ -68,8 +89,17 @@ _SANDBOX_TEMPLATE = textwrap.dedent('''\
         import builtins
         builtins.__import__ = _safe_import
 
-    # Load context data
-    CONTEXT = json.loads("""{context_json}""")
+    # Load context data from a separate file to avoid injection via
+    # embedded JSON breaking out of string literals (security fix S3).
+    import os as _os
+    _ctx_path = _os.environ.get("_RLM_CONTEXT_PATH", "")
+    if _ctx_path:
+        with __builtins__["open"](_ctx_path, "r", encoding="utf-8") if isinstance(__builtins__, dict) else open(_ctx_path, "r", encoding="utf-8") as _f:
+            CONTEXT = json.load(_f)
+    else:
+        CONTEXT = {{}}
+    # Remove os reference to prevent user code from using it
+    del _os, _ctx_path
 
     # Analysis results collector
     RESULTS = []
@@ -147,12 +177,17 @@ class ExecutionResult:
 def validate_code(code: str) -> tuple[bool, str]:
     """Validate analysis code for safety before execution.
 
+    Uses a two-layer approach (security fix S6):
+    1. Pattern-based blocklist for known-dangerous strings
+    2. AST-based validation to catch obfuscated access patterns
+
     Args:
         code: Python code string to validate.
 
     Returns:
         Tuple of (is_safe, reason). If is_safe is False, reason explains why.
     """
+    # Layer 1: Pattern-based blocklist
     for pattern in UNSAFE_PATTERNS:
         if pattern in code:
             return False, f"Unsafe pattern detected: {pattern}"
@@ -161,31 +196,58 @@ def validate_code(code: str) -> tuple[bool, str]:
     if len(code) > 50000:
         return False, "Code exceeds maximum allowed length (50000 chars)"
 
+    # Layer 2: AST-based validation to catch obfuscated patterns
+    import ast
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return False, f"Code has syntax error: {e}"
+
+    for node in ast.walk(tree):
+        # Block direct attribute access to dunder methods
+        if isinstance(node, ast.Attribute):
+            attr = node.attr
+            if attr.startswith("__") and attr.endswith("__"):
+                if attr not in ("__len__", "__str__", "__repr__",
+                                "__init__", "__name__", "__doc__"):
+                    return False, f"Unsafe dunder attribute access: {attr}"
+        # Block calls to dangerous builtins that might bypass string checks
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in ("type", "super", "classmethod",
+                                "staticmethod", "property"):
+                return False, f"Unsafe builtin call: {node.func.id}"
+
     return True, ""
 
 
-def build_sandbox_code(context_data, analysis_code: str) -> str:
+def build_sandbox_code(context_data, analysis_code: str) -> tuple[str, str]:
     """Build the complete sandbox script from context and analysis code.
+
+    Context data is written to a separate JSON file and loaded at runtime
+    via environment variable, preventing JSON injection attacks (S3).
 
     Args:
         context_data: The context to make available (will be JSON-serialized).
         analysis_code: The LLM-generated analysis code.
 
     Returns:
-        Complete Python script string ready for execution.
+        Tuple of (script_content, context_file_path).
     """
-    # Serialize context
+    # Write context to a separate temp file to avoid injection
     context_json = json.dumps(context_data)
-    # Escape triple quotes in context to avoid breaking the template
-    context_json = context_json.replace('"""', '\\"\\"\\"')
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    ) as ctx_f:
+        ctx_f.write(context_json)
+        context_path = ctx_f.name
 
     allowed_modules_str = repr(set(SAFE_MODULES))
 
-    return _SANDBOX_TEMPLATE.format(
+    script = _SANDBOX_TEMPLATE.format(
         allowed_modules=allowed_modules_str,
-        context_json=context_json,
         analysis_code=analysis_code,
     )
+    return script, context_path
 
 
 def execute_analysis(
@@ -218,10 +280,16 @@ def execute_analysis(
             error=f"Code validation failed: {reason}",
         )
 
-    # Build the sandbox script
+    # Build the sandbox script (context is written to a separate file)
+    context_path = None
     try:
-        script = build_sandbox_code(context_data, analysis_code)
+        script, context_path = build_sandbox_code(context_data, analysis_code)
     except (TypeError, ValueError) as e:
+        if context_path:
+            try:
+                os.unlink(context_path)
+            except OSError:
+                pass
         return ExecutionResult(
             success=False,
             results=[],
@@ -236,36 +304,38 @@ def execute_analysis(
         script_path = f.name
 
     try:
-        # Build command with memory limits on Linux
+        # Build command — avoid shell=True to prevent shell injection (S2)
         cmd = [sys.executable, script_path]
 
         env = os.environ.copy()
         # Restrict environment for safety
         env.pop("PYTHONSTARTUP", None)
         env.pop("PYTHONPATH", None)
+        # Pass context file path via environment variable
+        env["_RLM_CONTEXT_PATH"] = context_path
 
-        # Use ulimit for memory limits on Linux/macOS
+        # Set memory limits via preexec_fn on Linux/macOS (no shell=True)
+        preexec = None
         if platform.system() in ("Linux", "Darwin"):
             memory_bytes = max_memory_mb * 1024 * 1024
-            shell_cmd = f"ulimit -v {memory_bytes} 2>/dev/null; {sys.executable} {script_path}"
-            result = subprocess.run(
-                shell_cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                env=env,
-                cwd=tempfile.gettempdir(),
-            )
-        else:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                env=env,
-                cwd=tempfile.gettempdir(),
-            )
+            def _set_limits():
+                try:
+                    import resource
+                    resource.setrlimit(resource.RLIMIT_AS,
+                                       (memory_bytes, memory_bytes))
+                except (ImportError, ValueError, OSError):
+                    pass  # Best-effort memory limit
+            preexec = _set_limits
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            env=env,
+            cwd=tempfile.gettempdir(),
+            preexec_fn=preexec,
+        )
 
         if result.returncode != 0:
             return ExecutionResult(
@@ -307,11 +377,13 @@ def execute_analysis(
             error=f"Execution error: {e}",
         )
     finally:
-        # Clean up temp file
-        try:
-            os.unlink(script_path)
-        except OSError:
-            pass
+        # Clean up temp files
+        for path in (script_path, context_path):
+            if path:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
 
 
 def build_analysis_prompt(query: str, context_summary: dict) -> str:

@@ -54,13 +54,20 @@ def _sanitize_filter_value(value: str) -> str:
     """Sanitize a string value for use in LanceDB filter expressions.
 
     Escapes single quotes and strips characters that could alter query
-    semantics, preventing filter-injection attacks.
+    semantics, preventing filter-injection attacks (security fix S5).
+    Uses an allowlist approach: only keeps alphanumerics, basic
+    punctuation, path separators, and common filename characters.
     """
     # Replace single quotes with escaped single quotes
     sanitized = value.replace("'", "''")
-    # Remove semicolons and SQL comment markers
+    # Remove semicolons, SQL comment markers, and other injection vectors
     sanitized = re.sub(r"[;]", "", sanitized)
     sanitized = re.sub(r"--", "", sanitized)
+    # Strip backslash sequences that could escape quotes
+    sanitized = sanitized.replace("\\", "")
+    # Only allow safe characters: alphanumeric, dots, slashes, hyphens,
+    # underscores, spaces (common in file paths and type names)
+    sanitized = re.sub(r"[^\w\s./\-]", "", sanitized)
     return sanitized
 
 
