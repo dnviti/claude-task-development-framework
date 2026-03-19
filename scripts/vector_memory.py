@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vector memory layer for CTDF — semantic search over repository content.
+"""Vector memory layer for CodeClaw — semantic search over repository content.
 
 Provides an embedded vector database (LanceDB) that indexes source code,
 tasks, git history, and agent-generated documents for semantic retrieval.
@@ -97,8 +97,11 @@ def load_config(root: Path) -> dict:
             try:
                 data = json.loads(cp.read_text(encoding="utf-8"))
                 return data.get("vector_memory", {})
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as exc:
+                print(
+                    f"Warning: failed to parse config {cp}: {exc}",
+                    file=sys.stderr,
+                )
     return {}
 
 
@@ -113,8 +116,11 @@ def load_consistency_config(root: Path) -> dict:
             try:
                 data = json.loads(cp.read_text(encoding="utf-8"))
                 return data.get("memory_consistency", {})
-            except (json.JSONDecodeError, OSError):
-                pass
+            except (json.JSONDecodeError, OSError) as exc:
+                print(
+                    f"Warning: failed to parse config {cp}: {exc}",
+                    file=sys.stderr,
+                )
     return {}
 
 
@@ -153,6 +159,8 @@ def get_effective_config(root: Path) -> dict:
                 "auto_renew_interval", 10
             ),
         },
+        "gpu_mode": user_cfg.get("gpu_acceleration", {}).get("mode", "auto"),
+        "log_provider": user_cfg.get("gpu_acceleration", {}).get("log_provider", True),
     }
 
 
@@ -434,6 +442,32 @@ def _dir_size_mb(path: Path) -> float:
 
 # ── Index Command ────────────────────────────────────────────────────────────
 
+def _check_enabled_or_exit(root: Path, json_output: bool = False) -> dict:
+    """Check if vector memory is enabled; exit with informative message if not.
+
+    Args:
+        root: Project root path.
+        json_output: When True, print a JSON message instead of plain text.
+
+    Returns:
+        The effective configuration dict when vector memory is enabled.
+        Exits the process when disabled, so callers can use the returned
+        config directly without a redundant ``get_effective_config()`` call.
+    """
+    config = get_effective_config(root)
+    if config.get("enabled") is False:
+        msg = (
+            "Vector memory is disabled via vector_memory.enabled=false "
+            "in project-config.json. Set it to true to enable."
+        )
+        if json_output:
+            print(json.dumps({"status": "disabled_by_config", "message": msg}))
+        else:
+            print(f"Vector memory disabled: {msg}", file=sys.stderr)
+        sys.exit(0)
+    return config
+
+
 def cmd_index(args):
     """Full or incremental index of the repository.
 
@@ -441,7 +475,7 @@ def cmd_index(args):
     the index is always built from scratch regardless of existing state.
     """
     root = Path(args.root).resolve()
-    config = get_effective_config(root)
+    config = _check_enabled_or_exit(root)
     index_dir = root / config["index_path"]
     index_dir.mkdir(parents=True, exist_ok=True)
 
@@ -501,6 +535,8 @@ def cmd_index(args):
         "provider": config["embedding_provider"],
         "model": config["embedding_model"],
         "api_key_env": config["embedding_api_key_env"],
+        "gpu_mode": config.get("gpu_mode", "auto"),
+        "log_provider": config.get("log_provider", True),
     }
     provider = create_provider(emb_config)
     cache = EmbeddingCache(index_dir / "embedding_cache")
@@ -634,7 +670,7 @@ def _save_meta(index_dir: Path, config: dict, file_count: int):
 def cmd_search(args):
     """Semantic search over the vector index."""
     root = Path(args.root).resolve()
-    config = get_effective_config(root)
+    config = _check_enabled_or_exit(root, json_output=getattr(args, "json_output", False))
     index_dir = root / config["index_path"]
 
     ok, msg = _check_deps()
@@ -659,6 +695,8 @@ def cmd_search(args):
         "provider": config["embedding_provider"],
         "model": config["embedding_model"],
         "api_key_env": config["embedding_api_key_env"],
+        "gpu_mode": config.get("gpu_mode", "auto"),
+        "log_provider": config.get("log_provider", True),
     }
     provider = create_provider(emb_config)
     query_embedding = provider.embed([query])[0]
@@ -747,17 +785,44 @@ def cmd_status(args):
     """Show index health, chunk counts, and staleness."""
     root = Path(args.root).resolve()
     config = get_effective_config(root)
+
+    # When disabled, report status without accessing the index
+    if config.get("enabled") is False:
+        status = {
+            "status": "disabled_by_config",
+            "enabled": False,
+            "message": (
+                "Vector memory is disabled via vector_memory.enabled=false "
+                "in project-config.json. Set it to true to enable."
+            ),
+        }
+        if getattr(args, "json_output", False):
+            print(json.dumps(status, indent=2))
+        else:
+            print("Vector Memory Status")
+            print("=" * 40)
+            print(f"  Status:  disabled_by_config")
+            print(f"  Enabled: False")
+            print(f"  {status['message']}")
+        return
+
     index_dir = root / config["index_path"]
 
     # Check dependencies
-    from deps_check import check_vector_memory_deps
+    from deps_check import check_vector_memory_deps, detect_gpu_providers
     deps_ok, missing = check_vector_memory_deps()
+
+    gpu_providers = detect_gpu_providers()
+    gpu_mode = config.get("gpu_mode", "auto")
 
     status = {
         "enabled": config.get("enabled", False),
         "dependencies_installed": deps_ok,
         "missing_dependencies": missing,
         "index_path": str(index_dir),
+        "gpu_mode": gpu_mode,
+        "gpu_providers_available": gpu_providers,
+        "gpu_active": bool(gpu_providers) and gpu_mode != "cpu",
     }
 
     meta_path = index_dir / INDEX_META
@@ -853,7 +918,7 @@ def cmd_status(args):
 def cmd_clear(args):
     """Reset the vector index."""
     root = Path(args.root).resolve()
-    config = get_effective_config(root)
+    config = _check_enabled_or_exit(root)
     index_dir = root / config["index_path"]
 
     if not index_dir.exists():
@@ -899,7 +964,7 @@ def cmd_configure(args):
 def cmd_gc(args):
     """Garbage collection: prune old entries, compact tables, clean sessions."""
     root = Path(args.root).resolve()
-    config = get_effective_config(root)
+    config = _check_enabled_or_exit(root, json_output=getattr(args, "json_output", False))
     consistency = get_effective_consistency_config(root)
     index_dir = root / config["index_path"]
 
@@ -1033,6 +1098,7 @@ def cmd_gc(args):
 def cmd_agents(args):
     """List active and historical agent sessions."""
     root = Path(args.root).resolve()
+    _check_enabled_or_exit(root, json_output=getattr(args, "json_output", False))
 
     try:
         from memory_protocol import MemoryProtocol
@@ -1083,6 +1149,7 @@ def cmd_agents(args):
 def cmd_conflicts(args):
     """Show flagged contradictions between agents."""
     root = Path(args.root).resolve()
+    _check_enabled_or_exit(root, json_output=getattr(args, "json_output", False))
 
     try:
         from memory_protocol import MemoryProtocol
@@ -1119,6 +1186,7 @@ def cmd_conflicts(args):
         print("=" * 70)
         for c in conflicts:
             status = "RESOLVED" if c.get("resolved") else "PENDING"
+            method = c.get("resolve_strategy", "manual")
             print(
                 f"  [{status}] {c.get('conflict_id', '?')}"
                 f"  field={c.get('field', '?')}"
@@ -1127,12 +1195,92 @@ def cmd_conflicts(args):
             print(
                 f"           agent_a={c.get('entry_a_agent', '?')}"
                 f"  agent_b={c.get('entry_b_agent', '?')}"
+                f"  method={method}"
             )
             print(
                 f"           detected={c.get('detected_iso', '?')}"
             )
         print()
-        print(f"  To resolve: vector_memory.py conflicts --resolve <conflict_id>")
+        print("  To resolve manually: vector_memory.py conflicts --resolve <conflict_id>")
+        print("  To auto-resolve:     vector_memory.py resolve-conflicts [--dry-run]")
+        print()
+
+
+# ── Resolve Conflicts (LLM Judge) ────────────────────────────────────────────
+
+def cmd_resolve_conflicts(args):
+    """Auto-resolve pending opinion conflicts via LLM-as-judge."""
+    root = Path(args.root).resolve()
+
+    try:
+        from conflict_judge import (
+            batch_resolve, load_auto_resolve_config,
+            DEFAULT_STRATEGY, DEFAULT_PROVIDER,
+            DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_MAX_PER_RUN,
+        )
+    except ImportError:
+        print(json.dumps({"error": "conflict_judge module not available"}))
+        sys.exit(1)
+
+    # Load config defaults, then override with CLI args
+    config = load_auto_resolve_config(root)
+    strategy = args.strategy or config.get("strategy", DEFAULT_STRATEGY)
+    provider = args.provider or config.get("provider", DEFAULT_PROVIDER)
+    model = args.model or config.get("model", "")
+    threshold = (
+        args.threshold if args.threshold > 0
+        else config.get("confidence_threshold", DEFAULT_CONFIDENCE_THRESHOLD)
+    )
+    max_per_run = (
+        args.max_per_run if args.max_per_run > 0
+        else config.get("max_auto_resolve_per_run", DEFAULT_MAX_PER_RUN)
+    )
+
+    result = batch_resolve(
+        root=root,
+        strategy=strategy,
+        provider=provider,
+        model=model,
+        confidence_threshold=threshold,
+        max_per_run=max_per_run,
+        dry_run=args.dry_run,
+    )
+
+    if args.json_output:
+        print(json.dumps(result, indent=2))
+    else:
+        if not result.get("success"):
+            print(f"Error: {result.get('error', 'unknown')}")
+            sys.exit(1)
+
+        mode = "DRY RUN" if args.dry_run else "LIVE"
+        print(f"\nConflict Auto-Resolution [{mode}]")
+        print("=" * 60)
+        print(f"  Strategy:         {strategy}")
+        print(f"  Provider:         {provider}")
+        print(f"  Total pending:    {result.get('total_pending', 0)}")
+        print(f"  Opinion pending:  {result.get('opinion_pending', 0)}")
+        print(f"  Processed:        {result.get('processed', 0)}")
+        print(f"  Resolved:         {result.get('resolved', 0)}")
+        print(f"  Skipped/Failed:   {result.get('skipped', 0)}")
+
+        results_list = result.get("results", [])
+        if results_list:
+            print()
+            for r in results_list:
+                cid = r.get("conflict_id", "?")
+                resolved = "YES" if r.get("resolved") else "NO"
+                verdict = r.get("verdict", {})
+                winner = verdict.get("winner", "?") if verdict else "?"
+                conf = verdict.get("confidence", 0) if verdict else 0
+                err = r.get("error", "")
+                print(f"  {cid}: resolved={resolved} winner={winner} "
+                      f"confidence={conf:.2f}")
+                if err:
+                    print(f"         error: {err}")
+
+        if not results_list:
+            print("\n  No opinion conflicts to process.")
         print()
 
 
@@ -1237,10 +1385,10 @@ def hook_file_changed(file_path: str):
                 embeddings = cache.embed_with_cache(provider, texts)
 
                 # Tag entries with agent metadata if available
-                agent_id = os.environ.get("CTDF_AGENT_ID", "")
-                agent_type = os.environ.get("CTDF_AGENT_TYPE", "task")
-                session_id = os.environ.get("CTDF_SESSION_ID", "")
-                task_code = os.environ.get("CTDF_TASK_CODE", "")
+                agent_id = os.environ.get("CLAW_AGENT_ID", "")
+                agent_type = os.environ.get("CLAW_AGENT_TYPE", "task")
+                session_id = os.environ.get("CLAW_SESSION_ID", "")
+                task_code = os.environ.get("CLAW_TASK_CODE", "")
 
                 records = []
                 for chunk, emb in zip(chunks, embeddings):
@@ -1274,6 +1422,169 @@ def hook_file_changed(file_path: str):
 
     except Exception:
         pass  # Hook failures must be silent and non-blocking
+
+
+def hook_batch(file_paths: list[str]):
+    """Batch incremental re-indexing for multiple files at once.
+
+    More efficient than calling hook_file_changed per file because it
+    shares a single DB connection, embedding provider, and write lock
+    across all files. Designed for post-generation re-indexing (e.g.
+    after /docs generate writes multiple documentation files).
+
+    Failures are silent and non-blocking.
+    """
+    root = _find_project_root()
+    config = get_effective_config(root)
+
+    # Only skip if explicitly disabled
+    if config.get("enabled") is False:
+        return
+    if config.get("auto_index") is False:
+        return
+
+    ok, _ = _check_deps()
+    if not ok:
+        return
+
+    index_dir = root / config["index_path"]
+    if not (index_dir / "lancedb").exists():
+        sentinel = index_dir / ".init_attempted"
+        if sentinel.exists():
+            return
+        try:
+            index_dir.mkdir(parents=True, exist_ok=True)
+            sentinel.touch()
+            initialized = ensure_initialized(root)
+        except Exception:
+            return
+        if not initialized or not (index_dir / "lancedb").exists():
+            return
+
+    # Resolve and validate all file paths up front
+    valid_files: list[tuple[Path, str]] = []
+    for fp in file_paths:
+        try:
+            abs_path = Path(fp).resolve()
+            if not abs_path.exists():
+                continue
+            rel_path = str(abs_path.relative_to(root))
+            valid_files.append((abs_path, rel_path))
+        except ValueError:
+            continue  # File outside project root
+
+    if not valid_files:
+        return
+
+    try:
+        from chunkers import chunk_file, chunk_text_document
+        from embeddings import create_provider, EmbeddingCache
+
+        emb_config = {
+            "provider": config["embedding_provider"],
+            "model": config["embedding_model"],
+            "api_key_env": config["embedding_api_key_env"],
+        }
+        provider = create_provider(emb_config)
+        cache = EmbeddingCache(index_dir / "embedding_cache")
+
+        # Acquire write lock once for the entire batch
+        lock = None
+        try:
+            from memory_lock import MemoryLock
+            agent_id = os.environ.get("CTDF_AGENT_ID", f"agent-{os.getpid()}")
+            session_id = os.environ.get("CTDF_SESSION_ID", "")
+            lock = MemoryLock(index_dir, agent_id=agent_id,
+                              session_id=session_id, timeout=30.0)
+        except ImportError:
+            pass
+
+        # Pre-read agent metadata once (constant for process lifetime)
+        meta_agent_id = os.environ.get("CTDF_AGENT_ID", "")
+        meta_agent_type = os.environ.get("CTDF_AGENT_TYPE", "task")
+        meta_session_id = os.environ.get("CTDF_SESSION_ID", "")
+        meta_task_code = os.environ.get("CTDF_TASK_CODE", "")
+
+        # Pre-import tag_entry once (avoid repeated try/except per chunk)
+        _tag_entry_fn = None
+        if meta_agent_id:
+            try:
+                from memory_protocol import tag_entry
+                _tag_entry_fn = tag_entry
+            except ImportError:
+                pass
+
+        _ctx = lock.write() if lock else nullcontext()
+        with _ctx:
+            db = _open_db(index_dir)
+            table = _get_or_create_table(db, provider.dimension())
+            manifest = load_stored_manifest(index_dir)
+
+            indexed_count = 0
+            for abs_path, rel_path in valid_files:
+                content = read_file_safe(abs_path)
+                if not content:
+                    continue
+
+                # Remove old entries for this file
+                try:
+                    table.delete(
+                        f"file_path = '{_sanitize_filter_value(rel_path)}'")
+                except Exception:
+                    pass
+
+                # Chunk based on file type
+                ext = abs_path.suffix.lower()
+                if ext in {".md", ".txt", ".rst"}:
+                    chunks = chunk_text_document(
+                        rel_path, content,
+                        max_chunk_size=config["chunk_size"])
+                else:
+                    chunks = chunk_file(
+                        rel_path, content,
+                        max_chunk_size=config["chunk_size"])
+
+                if not chunks:
+                    continue
+
+                texts = [c.content for c in chunks]
+                embeddings = cache.embed_with_cache(provider, texts)
+
+                records = []
+                for chunk, emb in zip(chunks, embeddings):
+                    record = {
+                        "vector": emb,
+                        "content": chunk.content,
+                        "file_path": chunk.file_path,
+                        "chunk_type": chunk.chunk_type,
+                        "name": chunk.name,
+                        "start_line": chunk.start_line,
+                        "end_line": chunk.end_line,
+                        "language": chunk.language,
+                        "file_role": chunk.file_role,
+                        "content_hash": chunk.content_hash,
+                    }
+                    if _tag_entry_fn:
+                        _tag_entry_fn(record, meta_agent_id,
+                                      meta_agent_type, meta_task_code,
+                                      meta_session_id)
+                    records.append(record)
+
+                table.add(records)
+                manifest[rel_path] = compute_file_hash(abs_path)
+                indexed_count += 1
+
+            save_manifest(index_dir, manifest)
+
+        print(json.dumps({
+            "success": True,
+            "indexed_count": indexed_count,
+            "total_files": len(file_paths),
+            "skipped": len(file_paths) - indexed_count,
+        }))
+
+    except Exception:
+        pass  # Batch hook failures must be silent and non-blocking
 
 
 # ── Shared Helper: Index a Document ──────────────────────────────────────────
@@ -1363,7 +1674,7 @@ def try_vector_index(root: Path, content: str, doc_name: str,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="CTDF Vector Memory — semantic search over repository content",
+        description="CodeClaw Vector Memory — semantic search over repository content",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1457,9 +1768,34 @@ Examples:
     cfl.add_argument("--json", dest="json_output", action="store_true",
                      help="Output as JSON")
 
+    # ── resolve-conflicts ──
+    rc = sub.add_parser("resolve-conflicts",
+                        help="Auto-resolve opinion conflicts via LLM judge")
+    rc.add_argument("--root", default=".", help="Project root directory")
+    rc.add_argument("--strategy", choices=["single-judge", "majority-vote",
+                                           "confidence-merge"],
+                    default=None, help="Resolution strategy (default: from config)")
+    rc.add_argument("--provider", choices=["ollama", "claude"],
+                    default=None, help="LLM provider (default: from config)")
+    rc.add_argument("--model", default="", help="Override LLM model name")
+    rc.add_argument("--threshold", type=float, default=0,
+                    help="Confidence threshold for confidence-merge strategy")
+    rc.add_argument("--max", dest="max_per_run", type=int, default=0,
+                    help="Max conflicts to process (default: from config)")
+    rc.add_argument("--dry-run", dest="dry_run", action="store_true",
+                    help="Evaluate but do not mark conflicts as resolved")
+    rc.add_argument("--json", dest="json_output", action="store_true",
+                    help="Output as JSON")
+
     # ── hook (internal) ──
     hk = sub.add_parser("hook", help="Internal: incremental update hook")
     hk.add_argument("file_path", help="Path to the changed file")
+
+    # ── hook-batch (internal) ──
+    hkb = sub.add_parser("hook-batch",
+                         help="Internal: batch incremental update hook")
+    hkb.add_argument("file_paths", nargs="+",
+                     help="Paths to changed files")
 
     args = parser.parse_args()
 
@@ -1483,8 +1819,12 @@ Examples:
         cmd_agents(args)
     elif args.command == "conflicts":
         cmd_conflicts(args)
+    elif args.command == "resolve-conflicts":
+        cmd_resolve_conflicts(args)
     elif args.command == "hook":
         hook_file_changed(args.file_path)
+    elif args.command == "hook-batch":
+        hook_batch(args.file_paths)
 
 
 if __name__ == "__main__":

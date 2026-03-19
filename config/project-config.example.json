@@ -23,7 +23,16 @@
     "gc_ttl_days": 30,
     "max_index_size_mb": 500,
     "conflict_strategy": "auto",
-    "enable_versioned_reads": false
+    "enable_versioned_reads": false,
+    "auto_resolve": {
+      "enabled": false,
+      "strategy": "single-judge",
+      "provider": "ollama",
+      "confidence_threshold": 0.8,
+      "num_votes": 3,
+      "max_auto_resolve_per_run": 10,
+      "model": ""
+    }
   },
   "vector_memory": {
     "enabled": false,
@@ -44,6 +53,10 @@
       "timeout": 30,
       "auto_renew_interval": 10,
       "_comment": "Lock backend for multi-agent coordination. Types: file (default, single-machine), sqlite (networked filesystems), redis (distributed, requires pip install redis)"
+    },
+    "gpu_acceleration": {
+      "mode": "auto",
+      "log_provider": true
     }
   },
   "mcp_server": {
@@ -93,6 +106,14 @@
         "post_url": "https://news.ycombinator.com/submit"
       }
     ]
+  },
+  "image_generation": {
+    "enabled": false,
+    "provider": "local",
+    "api_key_env": "",
+    "default_size": "1024x1024",
+    "default_style": "natural",
+    "output_dir": "assets/generated"
   },
   "ollama": {
     "enabled": false,
