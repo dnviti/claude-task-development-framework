@@ -23,7 +23,16 @@
     "gc_ttl_days": 30,
     "max_index_size_mb": 500,
     "conflict_strategy": "auto",
-    "enable_versioned_reads": false
+    "enable_versioned_reads": false,
+    "auto_resolve": {
+      "enabled": false,
+      "strategy": "single-judge",
+      "provider": "ollama",
+      "confidence_threshold": 0.8,
+      "num_votes": 3,
+      "max_auto_resolve_per_run": 10,
+      "model": ""
+    }
   },
   "vector_memory": {
     "enabled": false,
@@ -35,7 +44,56 @@
     "index_path": ".claude/memory/vectors",
     "batch_size": 64,
     "include_patterns": [],
-    "exclude_patterns": []
+    "exclude_patterns": [],
+    "lock_backend": {
+      "type": "file",
+      "sqlite_path": ".claude/memory/locks/lock.db",
+      "redis_url": "redis://localhost:6379",
+      "redis_key_prefix": "ctdf:",
+      "timeout": 30,
+      "auto_renew_interval": 10,
+      "_comment": "Lock backend for multi-agent coordination. Types: file (default, single-machine), sqlite (networked filesystems), redis (distributed, requires pip install redis)"
+    },
+    "backend": "lancedb",
+    "sqlite": {
+      "enabled": false,
+      "hybrid_weight_vector": 0.7,
+      "hybrid_weight_text": 0.3,
+      "db_path": ".claude/memory/sqlite/memory.db"
+    },
+    "gpu_acceleration": {
+      "mode": "auto",
+      "log_provider": true
+    },
+    "event_sourcing": {
+      "enabled": false,
+      "compact_interval_seconds": 300,
+      "max_segment_size_mb": 10,
+      "auto_compact_on_search": true
+    },
+    "rlm": {
+      "enabled": false,
+      "provider": "ollama",
+      "max_depth": 3,
+      "max_context_mb": 10,
+      "aggregation": "map-reduce",
+      "timeout_seconds": 120
+    },
+    "orchestrator": {
+      "backends": ["lancedb"],
+      "routing_weights": {
+        "lancedb": 1.0,
+        "sqlite": 0.8,
+        "rlm": 0.6
+      },
+      "fallback_chain": ["lancedb", "sqlite", "rlm"],
+      "query_routing": {
+        "exact": "sqlite",
+        "semantic": "lancedb",
+        "deep": "rlm"
+      },
+      "rrf_k": 60
+    }
   },
   "mcp_server": {
     "enabled": false,
@@ -84,6 +142,14 @@
         "post_url": "https://news.ycombinator.com/submit"
       }
     ]
+  },
+  "image_generation": {
+    "enabled": false,
+    "provider": "local",
+    "api_key_env": "",
+    "default_size": "1024x1024",
+    "default_style": "natural",
+    "output_dir": "assets/generated"
   },
   "ollama": {
     "enabled": false,
