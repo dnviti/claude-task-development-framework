@@ -63,7 +63,8 @@
     },
     "gpu_acceleration": {
       "mode": "auto",
-      "log_provider": true
+      "log_provider": true,
+      "_comment": "GPU mode auto-detected during /setup. Values: auto (detect at runtime), gpu (require GPU), cpu (force CPU). Package mapping: nvidia=onnxruntime-gpu, amd=onnxruntime-rocm, apple=onnxruntime-silicon, windows=onnxruntime-directml, none=onnxruntime"
     },
     "event_sourcing": {
       "enabled": false,
