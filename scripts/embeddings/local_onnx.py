@@ -185,6 +185,12 @@ def _inject_gpu_lib_paths(paths: list[str]) -> None:
             )
     except ImportError:
         # deps_check unavailable -- fall back to accepting all candidates
+        logger.warning(
+            "deps_check module not available; GPU path allowlist "
+            "validation skipped for %d candidate path(s). Install the "
+            "full CodeClaw plugin to enable path validation.",
+            len(candidate_paths),
+        )
         new_paths = candidate_paths
 
     if new_paths:

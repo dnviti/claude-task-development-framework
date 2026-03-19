@@ -423,6 +423,17 @@ class TestGpuPathAllowlist:
         result = _build_effective_allowlist(config_allowlist=custom)
         assert "/my/custom/gpu/path" in result
 
+    def test_build_effective_allowlist_rejects_wildcard_only(self):
+        """Overly-broad patterns like '*' are stripped from config allowlist."""
+        from deps_check import _build_effective_allowlist
+
+        config = ["*", "/my/safe/path", "?", "/*"]
+        result = _build_effective_allowlist(config_allowlist=config)
+        assert "*" not in result
+        assert "?" not in result
+        assert "/*" not in result
+        assert "/my/safe/path" in result
+
     def test_load_allowlist_from_config(self, tmp_path, monkeypatch):
         """Allowlist is loaded from project-config.json."""
         from deps_check import _load_gpu_path_allowlist_from_config

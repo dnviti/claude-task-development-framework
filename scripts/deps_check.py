@@ -25,6 +25,9 @@ from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
 
+# Cache platform detection once at import time (the OS never changes mid-run).
+_PLATFORM_SYSTEM: str = platform.system()
+
 
 # ── GPU Path Allowlist ────────────────────────────────────────────────────────
 
@@ -115,10 +118,23 @@ def _build_effective_allowlist(
     if config_allowlist is not None:
         # User explicitly set the allowlist -- honour it but always keep
         # site-packages patterns as a baseline.
-        return config_allowlist + site_dirs
+        # Reject overly-broad patterns that would effectively disable the
+        # allowlist (e.g. "*", "?", "/*").
+        safe_patterns: list[str] = []
+        for pat in config_allowlist:
+            stripped = pat.strip().rstrip("/\\")
+            if stripped in ("*", "?", "**", "/*", "\\*"):
+                logger.warning(
+                    "Ignoring overly-broad gpu_path_allowlist pattern: %r "
+                    "(would match all paths)",
+                    pat,
+                )
+                continue
+            safe_patterns.append(pat)
+        return safe_patterns + site_dirs
 
     # Default allowlist + site-packages
-    system = platform.system()
+    system = _PLATFORM_SYSTEM
     base = list(DEFAULT_GPU_PATH_ALLOWLIST)
 
     if system == "Windows":
@@ -152,7 +168,7 @@ def _path_matches_allowlist(path: str, allowlist: list[str]) -> bool:
     except (OSError, ValueError):
         return False
 
-    is_win = platform.system() == "Windows"
+    is_win = _PLATFORM_SYSTEM == "Windows"
     if is_win:
         resolved_lower = resolved.lower()
 
