@@ -54,7 +54,7 @@ function Write-Step  { param([string]$Msg) Write-Host "-> $Msg" -ForegroundColor
 
 # ── Version Detection ────────────────────────────────────────────────────────
 
-function Get-CtdfVersion {
+function Get-ClawVersion {
     $manifestPath = Join-Path $ScriptRoot "manifest.json"
     if (Test-Path $manifestPath) {
         try {
@@ -500,7 +500,7 @@ function Main {
     $TargetDir = (Resolve-Path $Target -ErrorAction Stop).Path
 
     # Detect version
-    $script:Version = Get-CtdfVersion
+    $script:Version = Get-ClawVersion
 
     # Detect platform
     if (-not $Platform) {

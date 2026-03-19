@@ -436,7 +436,7 @@ def _to_copilot(skills: list[dict[str, Any]], output_dir: Path) -> list[str]:
     sections: list[str] = []
     sections.append("# CodeClaw Project Skills\n")
     sections.append(
-        "This project uses the CodeClaw. "
+        "This project uses CodeClaw. "
         "The following skills are available:\n"
     )
 
