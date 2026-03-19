@@ -327,20 +327,50 @@ Use `AskUserQuestion`:
 
 **9.7c. Automated installation sequence (when user enables):**
 
-1. **Install all Python packages** in one command:
+1. **Detect GPU hardware and install correct ONNX Runtime variant:**
+
+   First, detect the user's GPU hardware:
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/deps_check.py detect-gpu
+   ```
+
+   Parse the JSON result to get `vendor`, `vram_gb`, `recommended_package`, and `gpu_mode`.
+
+   Present the detection result:
+   > **GPU Detection:**
+   > - **Vendor:** `<vendor>` (nvidia / amd / apple / none)
+   > - **VRAM:** `<vram_gb>` GB
+   > - **Recommended package:** `<recommended_package>`
+   > - **Mode:** `<gpu_mode>` (gpu / cpu)
+
+   If `vendor` is `"none"` and `gpu_mode` is `"cpu"`:
+   > No GPU detected. ONNX Runtime will use CPU-only mode.
+
+   **Install all Python packages** in one command, using the detected ONNX Runtime variant:
 
    ```bash
-   pip install "mcp>=1.0" "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"
+   pip install "mcp>=1.0" "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0" "<recommended_package>"
    ```
+
+   Where `<recommended_package>` is the value from the GPU detection (e.g., `onnxruntime-gpu` for NVIDIA, `onnxruntime-rocm` for AMD, `onnxruntime-silicon` for Apple Silicon, `onnxruntime-directml` for Windows, or `onnxruntime` for CPU-only).
 
    If `pip install` fails, display:
    > **Action required:** Install vector memory dependencies manually:
    > ```
-   > pip install "mcp>=1.0" "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0"
+   > pip install "mcp>=1.0" "lancedb>=0.5.0,<1.0" "sentence-transformers>=2.7.0,<3.0" "<recommended_package>"
    > ```
    > Then re-run: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vector_memory.py index --force-init`
 
    Do NOT continue with remaining sub-steps if pip fails — skip to Step 10 with a warning.
+
+   **After install, verify GPU provider is available:**
+
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/deps_check.py verify-gpu
+   ```
+
+   - If `available` is `true`: report the active GPU provider(s).
+   - If `available` is `false` and a GPU was detected: warn that GPU provider failed to load and falling back to CPU mode. Set `gpu_mode` to `"cpu"` for the config update below.
 
 2. **Update project config:**
 
@@ -353,6 +383,8 @@ Use `AskUserQuestion`:
    Set the following fields in `.claude/project-config.json`:
    - `vector_memory.enabled = true`
    - `vector_memory.auto_index = true`
+   - `vector_memory.gpu_acceleration.mode` = `<gpu_mode>` from GPU detection (`"gpu"` or `"cpu"`)
+   - `vector_memory.gpu_acceleration.log_provider = true`
    - `mcp_server.enabled = true`
    - `mcp_server.auto_start = true`
 
